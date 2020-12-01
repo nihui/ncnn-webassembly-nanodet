@@ -32,6 +32,16 @@
         var has_simd;
         var has_threads;
 
+        var wasmModuleLoaded = false;
+        var wasmModuleLoadedCallbacks = [];
+
+        Module.onRuntimeInitialized = function() {
+            wasmModuleLoaded = true;
+            for (var i = 0; i < wasmModuleLoadedCallbacks.length; i++) {
+                wasmModuleLoadedCallbacks[i]();
+            }
+        }
+
         wasmFeatureDetect.simd().then(simdSupported => {
             has_simd = simdSupported;
 
@@ -119,17 +129,26 @@
                 //Setup image memory
                 var id = ctx.getImageData(0, 0, canvas.width, canvas.height);
                 var d = id.data;
-                dst = _malloc(d.length);
 
-                // max 20 objects
-                resultarray = new Float32Array(6 * 20);
-                resultbuffer = _malloc(6 * 20 * Float32Array.BYTES_PER_ELEMENT);
+                if (wasmModuleLoaded) {
+                    mallocAndCallSFilter();
+                } else {
+                    wasmModuleLoadedCallbacks.push(mallocAndCallSFilter);
+                }
 
-                HEAPF32.set(resultarray, resultbuffer / Float32Array.BYTES_PER_ELEMENT);
+                function mallocAndCallSFilter() {
+                    dst = _malloc(d.length);
 
-                //console.log("What " + d.length);
+                    // max 20 objects
+                    resultarray = new Float32Array(6 * 20);
+                    resultbuffer = _malloc(6 * 20 * Float32Array.BYTES_PER_ELEMENT);
 
-                sFilter();
+                    HEAPF32.set(resultarray, resultbuffer / Float32Array.BYTES_PER_ELEMENT);
+
+                    //console.log("What " + d.length);
+
+                    sFilter();
+                }
             });
 
         });
