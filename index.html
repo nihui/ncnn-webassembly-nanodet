@@ -5,6 +5,8 @@
     <title>ncnn webassembly nanodet camera</title>
     <style>
         video {
+/*             position: absolute; */
+/*             visibility: hidden; */
         }
         canvas {
             border: 1px solid black;
@@ -22,19 +24,62 @@
         </div>
     </div>
 
+    <script src="wasmFeatureDetect.js"></script>
+
     <script type='text/javascript'>
         var Module = {};
-        fetch('nanodet.wasm')
-            .then(response => response.arrayBuffer())
-            .then(buffer => {
-                Module.wasmBinary = buffer;
-                var script = document.createElement('script');
-                script.src = 'nanodet.js';
-                script.onload = function() {
-                  console.log('Emscripten boilerplate loaded.');
+
+        var has_simd;
+        var has_threads;
+
+        wasmFeatureDetect.simd().then(simdSupported => {
+            has_simd = simdSupported;
+
+            wasmFeatureDetect.threads().then(threadsSupported => {
+                has_threads = threadsSupported;
+
+                if (has_simd)
+                {
+                    if (has_threads)
+                    {
+                        nanodet_module_name = 'nanodet-simd-omp';
+                    }
+                    else
+                    {
+                        nanodet_module_name = 'nanodet-simd';
+                    }
                 }
-                document.body.appendChild(script);
+                else
+                {
+                    if (has_threads)
+                    {
+                        nanodet_module_name = 'nanodet-omp';
+                    }
+                    else
+                    {
+                        nanodet_module_name = 'nanodet';
+                    }
+                }
+
+                console.log('load ' + nanodet_module_name);
+
+                var nanodetwasm = nanodet_module_name + '.wasm';
+                var nanodetjs = nanodet_module_name + '.js';
+
+                fetch(nanodetwasm)
+                    .then(response => response.arrayBuffer())
+                    .then(buffer => {
+                        Module.wasmBinary = buffer;
+                        var script = document.createElement('script');
+                        script.src = nanodetjs;
+                        script.onload = function() {
+                            console.log('Emscripten boilerplate loaded.');
+                        }
+                        document.body.appendChild(script);
+                    });
+
             });
+        });
 
         var dst = null;
         var resultarray = null;
