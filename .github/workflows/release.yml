@@ -53,3 +53,4 @@ jobs:
       with:
         branch: gh-pages
         folder: deploy
+        single-commit: true
