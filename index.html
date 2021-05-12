@@ -2,7 +2,8 @@
 
 <head>
     <meta charset="utf-8">
-    <title>ncnn webassembly nanodet camera</title>
+    <meta name="viewport" content="width=device-width" />
+    <title>ncnn webassembly nanodet</title>
     <style>
         video {
 /*             position: absolute; */
@@ -17,11 +18,14 @@
 
 <body>
     <div>
-        <h1>ncnn webassembly nanodet camera</h1>
-        <video id="video" playsinline autoplay></video>
+        <h1>ncnn webassembly nanodet</h1>
+        <div>
+            <button disabled id="switch-camera-btn" style="height:48px">Switch Camera</button>
+        </div>
         <div>
             <canvas id="canvas" width="640"></canvas>
         </div>
+        <video id="video" playsinline autoplay></video>
     </div>
 
     <script src="wasmFeatureDetect.js"></script>
@@ -91,28 +95,21 @@
             });
         });
 
+        var shouldFaceUser = true;
+        var stream = null;
+        var w = 640;
+        var h = 480;
+
         var dst = null;
         var resultarray = null;
         var resultbuffer = null;
         window.addEventListener('DOMContentLoaded', function() {
             var isStreaming = false;
+            switchcamerabtn = document.getElementById('switch-camera-btn');
             video = document.getElementById('video');
             canvas = document.getElementById('canvas');
             ctx = canvas.getContext('2d');
-            w = 640;
-            h = 480;
-            var constraints = { audio: false, video: { width: w, height: h } };
-            navigator.mediaDevices.getUserMedia(constraints)
-                .then(function(mediaStream) {
-                    var video = document.querySelector('video');
-                    video.srcObject = mediaStream;
-                    video.onloadedmetadata = function(e) {
-                        video.play();
-                    };
-                })
-                .catch(function(err) {
-                    console.log(err.message);
-                });
+
             // Wait until the video stream canvas play
             video.addEventListener('canplay', function(e) {
                 if (!isStreaming) {
@@ -145,7 +142,43 @@
                 }
             });
 
+            // check whether we can use facingMode
+            var supports = navigator.mediaDevices.getSupportedConstraints();
+            if (supports['facingMode'] === true) {
+                switchcamerabtn.disabled = false;
+            }
+
+            switchcamerabtn.addEventListener('click', function() {
+                if (stream == null)
+                    return
+
+                stream.getTracks().forEach(t => {
+                    t.stop();
+                });
+
+                shouldFaceUser = !shouldFaceUser;
+                capture();
+            });
+
+            capture();
         });
+
+        function capture() {
+            var constraints = { audio: false, video: { width: 640, height: 480, facingMode: shouldFaceUser ? 'user' : 'environment' } };
+            navigator.mediaDevices.getUserMedia(constraints)
+                .then(function(mediaStream) {
+                    var video = document.querySelector('video');
+                    stream = mediaStream;
+                    video.srcObject = mediaStream;
+                    video.onloadedmetadata = function(e) {
+                        video.play();
+                    };
+                })
+                .catch(function(err) {
+                    console.log(err.message);
+                });
+        }
+
 
         function ncnn_nanodet() {
             var canvas = document.getElementById('canvas');
