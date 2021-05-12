@@ -134,6 +134,12 @@
                 }
 
                 function mallocAndCallSFilter() {
+                    if (dst != null)
+                    {
+                        _free(dst);
+                        dst = null;
+                    }
+
                     dst = _malloc(d.length);
 
                     //console.log("What " + d.length);
