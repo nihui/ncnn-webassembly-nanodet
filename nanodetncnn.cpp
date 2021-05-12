@@ -17,8 +17,6 @@
 #include "benchmark.h"
 #include "nanodet.h"
 
-static NanoDet* g_nanodet = 0;
-
 static int draw_fps(cv::Mat& rgba)
 {
     // resolve moving average
@@ -73,9 +71,9 @@ static int draw_fps(cv::Mat& rgba)
     return 0;
 }
 
-extern "C" {
+static NanoDet* g_nanodet = 0;
 
-void nanodet_ncnn(unsigned char* rgba_data, int w, int h)
+static void on_image_render(cv::Mat& rgba)
 {
     if (!g_nanodet)
     {
@@ -87,8 +85,6 @@ void nanodet_ncnn(unsigned char* rgba_data, int w, int h)
         g_nanodet->load("m", 320, mean_vals, norm_vals);
     }
 
-    cv::Mat rgba(h, w, CV_8UC4, (void*)rgba_data);
-
     std::vector<Object> objects;
     g_nanodet->detect(rgba, objects);
 
@@ -97,4 +93,85 @@ void nanodet_ncnn(unsigned char* rgba_data, int w, int h)
     draw_fps(rgba);
 }
 
+#ifdef __EMSCRIPTEN_PTHREADS__
+
+static const unsigned char* rgba_data = 0;
+static int w = 0;
+static int h = 0;
+
+static ncnn::Mutex lock;
+static ncnn::ConditionVariable condition;
+
+static ncnn::Mutex finish_lock;
+static ncnn::ConditionVariable finish_condition;
+
+static void worker()
+{
+    while (1)
+    {
+        lock.lock();
+        while (rgba_data == 0)
+        {
+            condition.wait(lock);
+        }
+
+        cv::Mat rgba(h, w, CV_8UC4, (void*)rgba_data);
+
+        on_image_render(rgba);
+
+        rgba_data = 0;
+
+        lock.unlock();
+
+        finish_lock.lock();
+        finish_condition.signal();
+        finish_lock.unlock();
+    }
 }
+
+#include <thread>
+static std::thread t(worker);
+
+extern "C" {
+
+void nanodet_ncnn(unsigned char* _rgba_data, int _w, int _h)
+{
+    lock.lock();
+    while (rgba_data != 0)
+    {
+        condition.wait(lock);
+    }
+
+    rgba_data = _rgba_data;
+    w = _w;
+    h = _h;
+
+    lock.unlock();
+
+    condition.signal();
+
+    // wait for finished
+    finish_lock.lock();
+    while (rgba_data != 0)
+    {
+        finish_condition.wait(finish_lock);
+    }
+    finish_lock.unlock();
+}
+
+}
+
+#else // __EMSCRIPTEN_PTHREADS__
+
+extern "C" {
+
+void nanodet_ncnn(unsigned char* rgba_data, int w, int h)
+{
+    cv::Mat rgba(h, w, CV_8UC4, (void*)rgba_data);
+
+    on_image_render(rgba);
+}
+
+}
+
+#endif // __EMSCRIPTEN_PTHREADS__
