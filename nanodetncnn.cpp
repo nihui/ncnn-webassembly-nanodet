@@ -12,9 +12,8 @@
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations under the License.
 
-#include <opencv2/core/core.hpp>
-#include <opencv2/imgproc/imgproc.hpp>
-#include "benchmark.h"
+#include <benchmark.h>
+#include <simpleocv.h>
 #include "nanodet.h"
 
 static int draw_fps(cv::Mat& rgba)

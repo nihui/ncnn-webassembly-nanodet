@@ -15,12 +15,10 @@ cd emsdk
 source emsdk/emsdk_env.sh
 ```
 
-2. Download and extract opencv-mobile and ncnn webassembly package
+2. Download and extract ncnn webassembly package
 ```shell
-wget https://github.com/nihui/opencv-mobile/releases/download/v11/opencv-mobile-2.4.13.7-webassembly.zip
-wget https://github.com/Tencent/ncnn/releases/download/20210507/ncnn-20210507-webassembly.zip
-unzip opencv-mobile-2.4.13.7-webassembly.zip
-unzip ncnn-20210507-webassembly.zip
+wget https://github.com/nihui/ncnn/releases/download/20210519/ncnn-20210519-webassembly.zip
+unzip ncnn-20210519-webassembly.zip
 ```
 
 3. Build four WASM feature variants

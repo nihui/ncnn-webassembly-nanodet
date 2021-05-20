@@ -8,13 +8,8 @@ if(NOT WASM_FEATURE)
     message(FATAL_ERROR "You must pass cmake option -DWASM_FEATURE and possible values are basic, simd, threads and simd-threads")
 endif()
 
-set(OpenCV_DIR "${CMAKE_CURRENT_SOURCE_DIR}/opencv-mobile-2.4.13.7-webassembly/${WASM_FEATURE}/share/OpenCV")
-find_package(OpenCV REQUIRED core imgproc)
-
-set(ncnn_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ncnn-20210507-webassembly/${WASM_FEATURE}/lib/cmake/ncnn")
+set(ncnn_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ncnn-20210519-webassembly/${WASM_FEATURE}/lib/cmake/ncnn")
 find_package(ncnn REQUIRED)
-
-include_directories(${OpenCV_INCLUDE_DIRS})
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -s FORCE_FILESYSTEM=1 -s INITIAL_MEMORY=256MB -s EXIT_RUNTIME=1")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -s FORCE_FILESYSTEM=1 -s INITIAL_MEMORY=256MB -s EXIT_RUNTIME=1")
@@ -31,4 +26,4 @@ if(${WASM_FEATURE} MATCHES "threads")
 endif()
 
 add_executable(nanodet-${WASM_FEATURE} nanodet.cpp nanodetncnn.cpp)
-target_link_libraries(nanodet-${WASM_FEATURE} ncnn ${OpenCV_LIBS})
+target_link_libraries(nanodet-${WASM_FEATURE} ncnn)

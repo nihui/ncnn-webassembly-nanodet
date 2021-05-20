@@ -15,9 +15,8 @@
 #ifndef NANODET_H
 #define NANODET_H
 
-#include <opencv2/core/core.hpp>
-
 #include <net.h>
+#include <simpleocv.h>
 
 struct Object
 {

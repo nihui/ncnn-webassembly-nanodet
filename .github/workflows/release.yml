@@ -19,12 +19,10 @@ jobs:
         ./emsdk install $EMSCRIPTEN_VERSION
         ./emsdk activate $EMSCRIPTEN_VERSION
 
-    - name: opencv-and-ncnn
+    - name: ncnn
       run: |
-        wget -q https://github.com/nihui/opencv-mobile/releases/download/v11/opencv-mobile-2.4.13.7-webassembly.zip
-        wget -q https://github.com/Tencent/ncnn/releases/download/20210507/ncnn-20210507-webassembly.zip
-        unzip -q opencv-mobile-2.4.13.7-webassembly.zip
-        unzip -q ncnn-20210507-webassembly.zip
+        wget -q https://github.com/nihui/ncnn/releases/download/20210519/ncnn-20210519-webassembly.zip
+        unzip -q ncnn-20210519-webassembly.zip
 
     - name: build
       run: |
