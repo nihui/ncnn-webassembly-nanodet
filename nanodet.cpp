@@ -14,6 +14,7 @@
 
 #include "nanodet.h"
 
+#include <float.h>
 #include <cpu.h>
 #include <simpleocv.h>
 
@@ -417,7 +418,7 @@ int NanoDet::draw(cv::Mat& rgba, const std::vector<Object>& objects)
 
         cv::Scalar cc(color[0], color[1], color[2], 255);
 
-        cv::rectangle(rgba, obj.rect, cc, 2);
+        cv::rectangle(rgba, cv::Rect(obj.rect.x, obj.rect.y, obj.rect.width, obj.rect.height), cc, 2);
 
         char text[256];
         sprintf(text, "%s %.1f%%", class_names[obj.label], obj.prob * 100);
