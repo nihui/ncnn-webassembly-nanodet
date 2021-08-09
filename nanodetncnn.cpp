@@ -72,7 +72,7 @@ static int draw_fps(cv::Mat& rgba)
 
 static NanoDet* g_nanodet = 0;
 
-static void on_image_render(cv::Mat& rgba)
+static void on_image_render(cv::Mat& rgba, unsigned short* result_buffer)
 {
     if (!g_nanodet)
     {
@@ -87,7 +87,7 @@ static void on_image_render(cv::Mat& rgba)
     std::vector<Object> objects;
     g_nanodet->detect(rgba, objects);
 
-    g_nanodet->draw(rgba, objects);
+    g_nanodet->draw(rgba, objects, result_buffer);
 
     draw_fps(rgba);
 }
@@ -164,11 +164,11 @@ void nanodet_ncnn(unsigned char* _rgba_data, int _w, int _h)
 
 extern "C" {
 
-void nanodet_ncnn(unsigned char* rgba_data, int w, int h)
+void nanodet_ncnn(unsigned char* rgba_data, int w, int h, unsigned short* result_buffer)
 {
     cv::Mat rgba(h, w, CV_8UC4, (void*)rgba_data);
 
-    on_image_render(rgba);
+    on_image_render(rgba, result_buffer);
 }
 
 }

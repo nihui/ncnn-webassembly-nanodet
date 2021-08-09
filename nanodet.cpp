@@ -368,76 +368,94 @@ int NanoDet::detect(const cv::Mat& rgba, std::vector<Object>& objects, float pro
     return 0;
 }
 
-int NanoDet::draw(cv::Mat& rgba, const std::vector<Object>& objects)
+int NanoDet::draw(cv::Mat& rgba, const std::vector<Object>& objects, unsigned short* result_buffer)
 {
-    static const char* class_names[] = {
-        "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light",
-        "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
-        "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
-        "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard",
-        "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
-        "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch",
-        "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone",
-        "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors", "teddy bear",
-        "hair drier", "toothbrush"
-    };
+    // static const char* class_names[] = {
+    //     "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light",
+    //     "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
+    //     "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
+    //     "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard",
+    //     "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
+    //     "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch",
+    //     "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone",
+    //     "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors", "teddy bear",
+    //     "hair drier", "toothbrush"
+    // };
 
-    static const unsigned char colors[19][3] = {
-        { 54,  67, 244},
-        { 99,  30, 233},
-        {176,  39, 156},
-        {183,  58, 103},
-        {181,  81,  63},
-        {243, 150,  33},
-        {244, 169,   3},
-        {212, 188,   0},
-        {136, 150,   0},
-        { 80, 175,  76},
-        { 74, 195, 139},
-        { 57, 220, 205},
-        { 59, 235, 255},
-        {  7, 193, 255},
-        {  0, 152, 255},
-        { 34,  87, 255},
-        { 72,  85, 121},
-        {158, 158, 158},
-        {139, 125,  96}
-    };
+    // static const unsigned char colors[19][3] = {
+    //     { 54,  67, 244},
+    //     { 99,  30, 233},
+    //     {176,  39, 156},
+    //     {183,  58, 103},
+    //     {181,  81,  63},
+    //     {243, 150,  33},
+    //     {244, 169,   3},
+    //     {212, 188,   0},
+    //     {136, 150,   0},
+    //     { 80, 175,  76},
+    //     { 74, 195, 139},
+    //     { 57, 220, 205},
+    //     { 59, 235, 255},
+    //     {  7, 193, 255},
+    //     {  0, 152, 255},
+    //     { 34,  87, 255},
+    //     { 72,  85, 121},
+    //     {158, 158, 158},
+    //     {139, 125,  96}
+    // };
 
-    int color_index = 0;
+    // int color_index = 0;
+    int maximum_objects_to_be_detected = 5;
 
-    for (size_t i = 0; i < objects.size(); i++)
+    for (size_t i = 0; i < maximum_objects_to_be_detected && i < objects.size(); i++)
     {
         const Object& obj = objects[i];
 
 //         fprintf(stderr, "%d = %.5f at %.2f %.2f %.2f x %.2f\n", obj.label, obj.prob,
 //                 obj.rect.x, obj.rect.y, obj.rect.width, obj.rect.height);
 
-        const unsigned char* color = colors[color_index % 19];
-        color_index++;
+        // const unsigned char* color = colors[color_index % 19];
+        // color_index++;
 
-        cv::Scalar cc(color[0], color[1], color[2], 255);
+        result_buffer[i*6 + 0] = obj.label + 1;
+        result_buffer[i*6 + 1] = (short)(obj.prob * 100);
+        result_buffer[i*6 + 2] = (short)(obj.rect.x);
+        result_buffer[i*6 + 3] = (short)(obj.rect.y);
+        result_buffer[i*6 + 4] = (short)(obj.rect.width);
+        result_buffer[i*6 + 5] = (short)(obj.rect.height);
 
-        cv::rectangle(rgba, cv::Rect(obj.rect.x, obj.rect.y, obj.rect.width, obj.rect.height), cc, 2);
+        // cv::Scalar cc(color[0], color[1], color[2], 255);
 
-        char text[256];
-        sprintf(text, "%s %.1f%%", class_names[obj.label], obj.prob * 100);
+        // cv::rectangle(rgba, cv::Rect(obj.rect.x, obj.rect.y, obj.rect.width, obj.rect.height), cc, 2);
 
-        int baseLine = 0;
-        cv::Size label_size = cv::getTextSize(text, cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseLine);
+        // char text[256];
+        // sprintf(text, "%s %.1f%%", class_names[obj.label], obj.prob * 100);
 
-        int x = obj.rect.x;
-        int y = obj.rect.y - label_size.height - baseLine;
-        if (y < 0)
-            y = 0;
-        if (x + label_size.width > rgba.cols)
-            x = rgba.cols - label_size.width;
+        // int baseLine = 0;
+        // cv::Size label_size = cv::getTextSize(text, cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseLine);
 
-        cv::rectangle(rgba, cv::Rect(cv::Point(x, y), cv::Size(label_size.width, label_size.height + baseLine)), cc, -1);
+        // int x = obj.rect.x;
+        // int y = obj.rect.y - label_size.height - baseLine;
+        // if (y < 0)
+        //     y = 0;
+        // if (x + label_size.width > rgba.cols)
+        //     x = rgba.cols - label_size.width;
 
-        cv::Scalar textcc = (color[0] + color[1] + color[2] >= 381) ? cv::Scalar(0, 0, 0, 255) : cv::Scalar(255, 255, 255, 255);
+        // cv::rectangle(rgba, cv::Rect(cv::Point(x, y), cv::Size(label_size.width, label_size.height + baseLine)), cc, -1);
 
-        cv::putText(rgba, text, cv::Point(x, y + label_size.height), cv::FONT_HERSHEY_SIMPLEX, 0.5, textcc, 1);
+        // cv::Scalar textcc = (color[0] + color[1] + color[2] >= 381) ? cv::Scalar(0, 0, 0, 255) : cv::Scalar(255, 255, 255, 255);
+
+        // cv::putText(rgba, text, cv::Point(x, y + label_size.height), cv::FONT_HERSHEY_SIMPLEX, 0.5, textcc, 1);
+    }
+
+    // resetting the result_buffer
+    for (int i = objects.size(); i < maximum_objects_to_be_detected; i++) {
+        result_buffer[i*6 + 0] = 0;
+        result_buffer[i*6 + 1] = 0;
+        result_buffer[i*6 + 2] = 0;
+        result_buffer[i*6 + 3] = 0;
+        result_buffer[i*6 + 4] = 0;
+        result_buffer[i*6 + 5] = 0;
     }
 
     return 0;
