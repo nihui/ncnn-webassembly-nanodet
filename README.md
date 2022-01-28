@@ -60,7 +60,7 @@ deploy/
 python3 -m http.server --directory deploy
 ```
 
-6. Deploy to local server(chrome as a example)
+6. Access local server(chrome as a example)
 ```
 # launch chrome browser, enter following command to address bar and press ENTER: 
 chrome://flags/#unsafely-treat-insecure-origin-as-secure
