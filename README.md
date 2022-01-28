@@ -55,11 +55,11 @@ deploy/
 ├── nanodet-threads.wasm
 ├── nanodet-threads.worker.js
 └── wasmFeatureDetect.js
-
-# dummy server(python3 as a example)
+```
+5. Deploy local server(python3 as a example)
+```
 python3 -m http.server --directory deploy
 ```
-
 6. Access local server(chrome as a example)
 ```
 # launch chrome browser, enter following command to address bar and press ENTER: 
