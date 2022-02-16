@@ -17,8 +17,8 @@ source emsdk/emsdk_env.sh
 
 2. Download and extract ncnn webassembly package
 ```shell
-wget https://github.com/nihui/ncnn/releases/download/20210519/ncnn-20210519-webassembly.zip
-unzip ncnn-20210519-webassembly.zip
+wget https://github.com/Tencent/ncnn/releases/download/20220216/ncnn-20220216-webassembly.zip
+unzip ncnn-20220216-webassembly.zip
 ```
 
 3. Build four WASM feature variants
