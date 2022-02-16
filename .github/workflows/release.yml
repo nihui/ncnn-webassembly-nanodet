@@ -21,8 +21,8 @@ jobs:
 
     - name: ncnn
       run: |
-        wget -q https://github.com/nihui/ncnn/releases/download/20210519/ncnn-20210519-webassembly.zip
-        unzip -q ncnn-20210519-webassembly.zip
+        wget -q https://github.com/nihui/ncnn/releases/download/20220216/ncnn-20210519-webassembly.zip
+        unzip -q ncnn-20220216-webassembly.zip
 
     - name: build
       run: |
