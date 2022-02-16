@@ -8,7 +8,7 @@ if(NOT WASM_FEATURE)
     message(FATAL_ERROR "You must pass cmake option -DWASM_FEATURE and possible values are basic, simd, threads and simd-threads")
 endif()
 
-set(ncnn_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ncnn-20210519-webassembly/${WASM_FEATURE}/lib/cmake/ncnn")
+set(ncnn_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ncnn-20220216-webassembly/${WASM_FEATURE}/lib/cmake/ncnn")
 find_package(ncnn REQUIRED)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -s FORCE_FILESYSTEM=1 -s INITIAL_MEMORY=256MB -s EXIT_RUNTIME=1")
