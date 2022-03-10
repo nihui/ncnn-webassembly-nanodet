@@ -18,13 +18,13 @@
 #include <cpu.h>
 #include <simpleocv.h>
 
-static inline float intersection_area(const Object& a, const Object& b)
+static inline float intersection_area(const Object &a, const Object &b)
 {
     cv::Rect_<float> inter = a.rect & b.rect;
     return inter.area();
 }
 
-static void qsort_descent_inplace(std::vector<Object>& faceobjects, int left, int right)
+static void qsort_descent_inplace(std::vector<Object> &faceobjects, int left, int right)
 {
     int i = left;
     int j = right;
@@ -52,16 +52,18 @@ static void qsort_descent_inplace(std::vector<Object>& faceobjects, int left, in
     {
         //         #pragma omp section
         {
-            if (left < j) qsort_descent_inplace(faceobjects, left, j);
+            if (left < j)
+                qsort_descent_inplace(faceobjects, left, j);
         }
         //         #pragma omp section
         {
-            if (i < right) qsort_descent_inplace(faceobjects, i, right);
+            if (i < right)
+                qsort_descent_inplace(faceobjects, i, right);
         }
     }
 }
 
-static void qsort_descent_inplace(std::vector<Object>& faceobjects)
+static void qsort_descent_inplace(std::vector<Object> &faceobjects)
 {
     if (faceobjects.empty())
         return;
@@ -69,7 +71,7 @@ static void qsort_descent_inplace(std::vector<Object>& faceobjects)
     qsort_descent_inplace(faceobjects, 0, faceobjects.size() - 1);
 }
 
-static void nms_sorted_bboxes(const std::vector<Object>& faceobjects, std::vector<int>& picked, float nms_threshold)
+static void nms_sorted_bboxes(const std::vector<Object> &faceobjects, std::vector<int> &picked, float nms_threshold)
 {
     picked.clear();
 
@@ -83,17 +85,16 @@ static void nms_sorted_bboxes(const std::vector<Object>& faceobjects, std::vecto
 
     for (int i = 0; i < n; i++)
     {
-        const Object& a = faceobjects[i];
+        const Object &a = faceobjects[i];
 
         int keep = 1;
         for (int j = 0; j < (int)picked.size(); j++)
         {
-            const Object& b = faceobjects[picked[j]];
+            const Object &b = faceobjects[picked[j]];
 
             // intersection over union
             float inter_area = intersection_area(a, b);
             float union_area = areas[i] + areas[picked[j]] - inter_area;
-            // float IoU = inter_area / union_area
             if (inter_area / union_area > nms_threshold)
                 keep = 0;
         }
@@ -103,51 +104,48 @@ static void nms_sorted_bboxes(const std::vector<Object>& faceobjects, std::vecto
     }
 }
 
-static void generate_proposals(const ncnn::Mat& cls_pred, const ncnn::Mat& dis_pred, int stride, const ncnn::Mat& in_pad, float prob_threshold, std::vector<Object>& objects)
+static inline float sigmoid(float x)
 {
-    const int num_grid = cls_pred.h;
+    return 1.0f / (1.0f + exp(-x));
+}
 
-    int num_grid_x;
-    int num_grid_y;
-    if (in_pad.w > in_pad.h)
-    {
-        num_grid_x = in_pad.w / stride;
-        num_grid_y = num_grid / num_grid_x;
-    }
-    else
-    {
-        num_grid_y = in_pad.h / stride;
-        num_grid_x = num_grid / num_grid_y;
-    }
+static void generate_proposals(const ncnn::Mat &pred, int stride, const ncnn::Mat &in_pad, float prob_threshold, std::vector<Object> &objects)
+{
+    const int num_grid = pred.h;
 
-    const int num_class = cls_pred.w;
-    const int reg_max_1 = dis_pred.w / 4;
+    int num_grid_x = pred.w;
+    int num_grid_y = pred.h;
+
+    const int num_class = 2; // number of classes. 80 for COCO
+    const int reg_max_1 = (pred.c - num_class) / 4;
 
     for (int i = 0; i < num_grid_y; i++)
     {
         for (int j = 0; j < num_grid_x; j++)
         {
-            const int idx = i * num_grid_x + j;
-
-            const float* scores = cls_pred.row(idx);
-
             // find label with max score
             int label = -1;
             float score = -FLT_MAX;
             for (int k = 0; k < num_class; k++)
             {
-                if (scores[k] > score)
+                float s = pred.channel(k).row(i)[j];
+                if (s > score)
                 {
                     label = k;
-                    score = scores[k];
+                    score = s;
                 }
             }
 
+            score = sigmoid(score);
             if (score >= prob_threshold)
             {
-                ncnn::Mat bbox_pred(reg_max_1, 4, (void*)dis_pred.row(idx));
+                ncnn::Mat bbox_pred(reg_max_1, 4);
+                for (int k = 0; k < reg_max_1 * 4; k++)
                 {
-                    ncnn::Layer* softmax = ncnn::create_layer("Softmax");
+                    bbox_pred[k] = pred.channel(num_class + k).row(i)[j];
+                }
+                {
+                    ncnn::Layer *softmax = ncnn::create_layer("Softmax");
 
                     ncnn::ParamDict pd;
                     pd.set(0, 1); // axis
@@ -171,7 +169,7 @@ static void generate_proposals(const ncnn::Mat& cls_pred, const ncnn::Mat& dis_p
                 for (int k = 0; k < 4; k++)
                 {
                     float dis = 0.f;
-                    const float* dis_after_sm = bbox_pred.row(k);
+                    const float *dis_after_sm = bbox_pred.row(k);
                     for (int l = 0; l < reg_max_1; l++)
                     {
                         dis += l * dis_after_sm[l];
@@ -180,8 +178,8 @@ static void generate_proposals(const ncnn::Mat& cls_pred, const ncnn::Mat& dis_p
                     pred_ltrb[k] = dis * stride;
                 }
 
-                float pb_cx = (j + 0.5f) * stride;
-                float pb_cy = (i + 0.5f) * stride;
+                float pb_cx = j * stride;
+                float pb_cy = i * stride;
 
                 float x0 = pb_cx - pred_ltrb[0];
                 float y0 = pb_cy - pred_ltrb[1];
@@ -208,7 +206,7 @@ NanoDet::NanoDet()
     workspace_pool_allocator.set_size_compare_ratio(0.f);
 }
 
-int NanoDet::load(const char* modeltype, int _target_size, const float* _mean_vals, const float* _norm_vals, bool use_gpu)
+int NanoDet::load(const char *modeltype, int _target_size, const float *_mean_vals, const float *_norm_vals, bool use_gpu)
 {
     nanodet.clear();
     blob_pool_allocator.clear();
@@ -229,8 +227,8 @@ int NanoDet::load(const char* modeltype, int _target_size, const float* _mean_va
 
     char parampath[256];
     char modelpath[256];
-    sprintf(parampath, "nanodet-%s.param", modeltype);
-    sprintf(modelpath, "nanodet-%s.bin", modeltype);
+    sprintf(parampath, "%s.param", modeltype);
+    sprintf(modelpath, "%s.bin", modeltype);
 
     nanodet.load_param(parampath);
     nanodet.load_model(modelpath);
@@ -246,7 +244,7 @@ int NanoDet::load(const char* modeltype, int _target_size, const float* _mean_va
     return 0;
 }
 
-int NanoDet::detect(const cv::Mat& rgba, std::vector<Object>& objects, float prob_threshold, float nms_threshold)
+int NanoDet::detect(const cv::Mat &rgba, std::vector<Object> &objects, float prob_threshold, float nms_threshold)
 {
     int width = rgba.cols;
     int height = rgba.rows;
@@ -280,47 +278,52 @@ int NanoDet::detect(const cv::Mat& rgba, std::vector<Object>& objects, float pro
 
     ncnn::Extractor ex = nanodet.create_extractor();
 
-    ex.input("input.1", in_pad);
+    ex.input("in0", in_pad);
 
     std::vector<Object> proposals;
 
     // stride 8
     {
-        ncnn::Mat cls_pred;
-        ncnn::Mat dis_pred;
-        ex.extract("cls_pred_stride_8", cls_pred);
-        ex.extract("dis_pred_stride_8", dis_pred);
+        ncnn::Mat pred;
+        ex.extract("231", pred);
 
         std::vector<Object> objects8;
-        generate_proposals(cls_pred, dis_pred, 8, in_pad, prob_threshold, objects8);
+        generate_proposals(pred, 8, in_pad, prob_threshold, objects8);
 
         proposals.insert(proposals.end(), objects8.begin(), objects8.end());
     }
 
     // stride 16
     {
-        ncnn::Mat cls_pred;
-        ncnn::Mat dis_pred;
-        ex.extract("cls_pred_stride_16", cls_pred);
-        ex.extract("dis_pred_stride_16", dis_pred);
+        ncnn::Mat pred;
+        ex.extract("228", pred);
 
         std::vector<Object> objects16;
-        generate_proposals(cls_pred, dis_pred, 16, in_pad, prob_threshold, objects16);
+        generate_proposals(pred, 16, in_pad, prob_threshold, objects16);
 
         proposals.insert(proposals.end(), objects16.begin(), objects16.end());
     }
 
     // stride 32
     {
-        ncnn::Mat cls_pred;
-        ncnn::Mat dis_pred;
-        ex.extract("cls_pred_stride_32", cls_pred);
-        ex.extract("dis_pred_stride_32", dis_pred);
+        ncnn::Mat pred;
+        ex.extract("225", pred);
 
         std::vector<Object> objects32;
-        generate_proposals(cls_pred, dis_pred, 32, in_pad, prob_threshold, objects32);
+        generate_proposals(pred, 32, in_pad, prob_threshold, objects32);
 
         proposals.insert(proposals.end(), objects32.begin(), objects32.end());
+    }
+
+    // stride 64
+    {
+        ncnn::Mat pred;
+        ex.extract("222", pred);
+
+        std::vector<Object> objects64;
+        generate_proposals(pred, 64, in_pad, prob_threshold, objects64);
+
+        proposals.insert(proposals.end(), objects64.begin(), objects64.end());
     }
 
     // sort all proposals by score from highest to lowest
@@ -358,7 +361,7 @@ int NanoDet::detect(const cv::Mat& rgba, std::vector<Object>& objects, float pro
     // sort objects by area
     struct
     {
-        bool operator()(const Object& a, const Object& b) const
+        bool operator()(const Object &a, const Object &b) const
         {
             return a.rect.area() > b.rect.area();
         }
@@ -368,52 +371,42 @@ int NanoDet::detect(const cv::Mat& rgba, std::vector<Object>& objects, float pro
     return 0;
 }
 
-int NanoDet::draw(cv::Mat& rgba, const std::vector<Object>& objects)
+int NanoDet::draw(cv::Mat &rgba, const std::vector<Object> &objects)
 {
-    static const char* class_names[] = {
-        "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light",
-        "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
-        "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
-        "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard",
-        "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
-        "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch",
-        "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone",
-        "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors", "teddy bear",
-        "hair drier", "toothbrush"
-    };
+    static const char *class_names[] = {
+        "Head", "Hand"};
 
     static const unsigned char colors[19][3] = {
-        { 54,  67, 244},
-        { 99,  30, 233},
-        {176,  39, 156},
-        {183,  58, 103},
-        {181,  81,  63},
-        {243, 150,  33},
-        {244, 169,   3},
-        {212, 188,   0},
-        {136, 150,   0},
-        { 80, 175,  76},
-        { 74, 195, 139},
-        { 57, 220, 205},
-        { 59, 235, 255},
-        {  7, 193, 255},
-        {  0, 152, 255},
-        { 34,  87, 255},
-        { 72,  85, 121},
+        {54, 67, 244},
+        {99, 30, 233},
+        {176, 39, 156},
+        {183, 58, 103},
+        {181, 81, 63},
+        {243, 150, 33},
+        {244, 169, 3},
+        {212, 188, 0},
+        {136, 150, 0},
+        {80, 175, 76},
+        {74, 195, 139},
+        {57, 220, 205},
+        {59, 235, 255},
+        {7, 193, 255},
+        {0, 152, 255},
+        {34, 87, 255},
+        {72, 85, 121},
         {158, 158, 158},
-        {139, 125,  96}
-    };
+        {139, 125, 96}};
 
     int color_index = 0;
 
     for (size_t i = 0; i < objects.size(); i++)
     {
-        const Object& obj = objects[i];
+        const Object &obj = objects[i];
 
-//         fprintf(stderr, "%d = %.5f at %.2f %.2f %.2f x %.2f\n", obj.label, obj.prob,
-//                 obj.rect.x, obj.rect.y, obj.rect.width, obj.rect.height);
+        //         fprintf(stderr, "%d = %.5f at %.2f %.2f %.2f x %.2f\n", obj.label, obj.prob,
+        //                 obj.rect.x, obj.rect.y, obj.rect.width, obj.rect.height);
 
-        const unsigned char* color = colors[color_index % 19];
+        const unsigned char *color = colors[color_index % 19];
         color_index++;
 
         cv::Scalar cc(color[0], color[1], color[2], 255);

@@ -16,7 +16,7 @@
 #include <simpleocv.h>
 #include "nanodet.h"
 
-static int draw_fps(cv::Mat& rgba)
+static int draw_fps(cv::Mat &rgba)
 {
     // resolve moving average
     float avg_fps = 0.f;
@@ -62,7 +62,7 @@ static int draw_fps(cv::Mat& rgba)
     int x = rgba.cols - label_size.width;
 
     cv::rectangle(rgba, cv::Rect(cv::Point(x, y), cv::Size(label_size.width, label_size.height + baseLine)),
-                    cv::Scalar(255, 255, 255, 255), -1);
+                  cv::Scalar(255, 255, 255, 255), -1);
 
     cv::putText(rgba, text, cv::Point(x, y + label_size.height),
                 cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 0, 255));
@@ -70,9 +70,9 @@ static int draw_fps(cv::Mat& rgba)
     return 0;
 }
 
-static NanoDet* g_nanodet = 0;
+static NanoDet *g_nanodet = 0;
 
-static void on_image_render(cv::Mat& rgba)
+static void on_image_render(cv::Mat &rgba)
 {
     if (!g_nanodet)
     {
@@ -81,7 +81,7 @@ static void on_image_render(cv::Mat& rgba)
         static const float mean_vals[3] = {103.53f, 116.28f, 123.675f};
         static const float norm_vals[3] = {1.f / 57.375f, 1.f / 57.12f, 1.f / 58.395f};
 
-        g_nanodet->load("m", 320, mean_vals, norm_vals);
+        g_nanodet->load("Head.torchscript.ncnn", 416, mean_vals, norm_vals);
     }
 
     std::vector<Object> objects;
@@ -94,7 +94,7 @@ static void on_image_render(cv::Mat& rgba)
 
 #ifdef __EMSCRIPTEN_PTHREADS__
 
-static const unsigned char* rgba_data = 0;
+static const unsigned char *rgba_data = 0;
 static int w = 0;
 static int h = 0;
 
@@ -114,7 +114,7 @@ static void worker()
             condition.wait(lock);
         }
 
-        cv::Mat rgba(h, w, CV_8UC4, (void*)rgba_data);
+        cv::Mat rgba(h, w, CV_8UC4, (void *)rgba_data);
 
         on_image_render(rgba);
 
@@ -131,46 +131,46 @@ static void worker()
 #include <thread>
 static std::thread t(worker);
 
-extern "C" {
-
-void nanodet_ncnn(unsigned char* _rgba_data, int _w, int _h)
+extern "C"
 {
-    lock.lock();
-    while (rgba_data != 0)
+
+    void nanodet_ncnn(unsigned char *_rgba_data, int _w, int _h)
     {
-        condition.wait(lock);
+        lock.lock();
+        while (rgba_data != 0)
+        {
+            condition.wait(lock);
+        }
+
+        rgba_data = _rgba_data;
+        w = _w;
+        h = _h;
+
+        lock.unlock();
+
+        condition.signal();
+
+        // wait for finished
+        finish_lock.lock();
+        while (rgba_data != 0)
+        {
+            finish_condition.wait(finish_lock);
+        }
+        finish_lock.unlock();
     }
-
-    rgba_data = _rgba_data;
-    w = _w;
-    h = _h;
-
-    lock.unlock();
-
-    condition.signal();
-
-    // wait for finished
-    finish_lock.lock();
-    while (rgba_data != 0)
-    {
-        finish_condition.wait(finish_lock);
-    }
-    finish_lock.unlock();
-}
-
 }
 
 #else // __EMSCRIPTEN_PTHREADS__
 
-extern "C" {
-
-void nanodet_ncnn(unsigned char* rgba_data, int w, int h)
+extern "C"
 {
-    cv::Mat rgba(h, w, CV_8UC4, (void*)rgba_data);
 
-    on_image_render(rgba);
-}
+    void nanodet_ncnn(unsigned char *rgba_data, int w, int h)
+    {
+        cv::Mat rgba(h, w, CV_8UC4, (void *)rgba_data);
 
+        on_image_render(rgba);
+    }
 }
 
 #endif // __EMSCRIPTEN_PTHREADS__
