@@ -109,14 +109,14 @@ static inline float sigmoid(float x)
     return 1.0f / (1.0f + exp(-x));
 }
 
-static void generate_proposals(const ncnn::Mat &pred, int stride, const ncnn::Mat &in_pad, float prob_threshold, std::vector<Object> &objects)
+static void generate_proposals(const ncnn::Mat &pred, int stride, int _num_class, const ncnn::Mat &in_pad, float prob_threshold, std::vector<Object> &objects)
 {
     const int num_grid = pred.h;
 
     int num_grid_x = pred.w;
     int num_grid_y = pred.h;
 
-    const int num_class = 2; // number of classes. 80 for COCO
+    const int num_class = _num_class; // number of classes. 80 for COCO
     const int reg_max_1 = (pred.c - num_class) / 4;
 
     for (int i = 0; i < num_grid_y; i++)
@@ -206,7 +206,7 @@ NanoDet::NanoDet()
     workspace_pool_allocator.set_size_compare_ratio(0.f);
 }
 
-int NanoDet::load(const char *modeltype, int _target_size, const float *_mean_vals, const float *_norm_vals, bool use_gpu)
+int NanoDet::load(const char *modeltype, bool use_gpu)
 {
     nanodet.clear();
     blob_pool_allocator.clear();
@@ -233,14 +233,6 @@ int NanoDet::load(const char *modeltype, int _target_size, const float *_mean_va
     nanodet.load_param(parampath);
     nanodet.load_model(modelpath);
 
-    target_size = _target_size;
-    mean_vals[0] = _mean_vals[0];
-    mean_vals[1] = _mean_vals[1];
-    mean_vals[2] = _mean_vals[2];
-    norm_vals[0] = _norm_vals[0];
-    norm_vals[1] = _norm_vals[1];
-    norm_vals[2] = _norm_vals[2];
-
     return 0;
 }
 
@@ -250,6 +242,7 @@ int NanoDet::detect(const cv::Mat &rgba, std::vector<Object> &objects, float pro
     int height = rgba.rows;
 
     // pad to multiple of 32
+    int num_classes = class_names.size();
     int w = width;
     int h = height;
     float scale = 1.f;
@@ -274,6 +267,9 @@ int NanoDet::detect(const cv::Mat &rgba, std::vector<Object> &objects, float pro
     ncnn::Mat in_pad;
     ncnn::copy_make_border(in, in_pad, hpad / 2, hpad - hpad / 2, wpad / 2, wpad - wpad / 2, ncnn::BORDER_CONSTANT, 0.f);
 
+    // static const float mean_vals[3] = {103.53f, 116.28f, 123.675f};
+    // static const float norm_vals[3] = {1.f / 57.375f, 1.f / 57.12f, 1.f / 58.395f};
+
     in_pad.substract_mean_normalize(mean_vals, norm_vals);
 
     ncnn::Extractor ex = nanodet.create_extractor();
@@ -288,7 +284,7 @@ int NanoDet::detect(const cv::Mat &rgba, std::vector<Object> &objects, float pro
         ex.extract("231", pred);
 
         std::vector<Object> objects8;
-        generate_proposals(pred, 8, in_pad, prob_threshold, objects8);
+        generate_proposals(pred, 8, num_classes, in_pad, prob_threshold, objects8);
 
         proposals.insert(proposals.end(), objects8.begin(), objects8.end());
     }
@@ -299,7 +295,7 @@ int NanoDet::detect(const cv::Mat &rgba, std::vector<Object> &objects, float pro
         ex.extract("228", pred);
 
         std::vector<Object> objects16;
-        generate_proposals(pred, 16, in_pad, prob_threshold, objects16);
+        generate_proposals(pred, 16, num_classes, in_pad, prob_threshold, objects16);
 
         proposals.insert(proposals.end(), objects16.begin(), objects16.end());
     }
@@ -310,7 +306,7 @@ int NanoDet::detect(const cv::Mat &rgba, std::vector<Object> &objects, float pro
         ex.extract("225", pred);
 
         std::vector<Object> objects32;
-        generate_proposals(pred, 32, in_pad, prob_threshold, objects32);
+        generate_proposals(pred, 32, num_classes, in_pad, prob_threshold, objects32);
 
         proposals.insert(proposals.end(), objects32.begin(), objects32.end());
     }
@@ -321,7 +317,7 @@ int NanoDet::detect(const cv::Mat &rgba, std::vector<Object> &objects, float pro
         ex.extract("222", pred);
 
         std::vector<Object> objects64;
-        generate_proposals(pred, 64, in_pad, prob_threshold, objects64);
+        generate_proposals(pred, 64, num_classes, in_pad, prob_threshold, objects64);
 
         proposals.insert(proposals.end(), objects64.begin(), objects64.end());
     }
@@ -373,9 +369,6 @@ int NanoDet::detect(const cv::Mat &rgba, std::vector<Object> &objects, float pro
 
 int NanoDet::draw(cv::Mat &rgba, const std::vector<Object> &objects)
 {
-    static const char *class_names[] = {
-        "Head", "Hand"};
-
     static const unsigned char colors[19][3] = {
         {54, 67, 244},
         {99, 30, 233},
@@ -414,7 +407,7 @@ int NanoDet::draw(cv::Mat &rgba, const std::vector<Object> &objects)
         cv::rectangle(rgba, cv::Rect(obj.rect.x, obj.rect.y, obj.rect.width, obj.rect.height), cc, 2);
 
         char text[256];
-        sprintf(text, "%s %.1f%%", class_names[obj.label], obj.prob * 100);
+        sprintf(text, "%s %.1f%%", class_names[obj.label].c_str(), obj.prob * 100);
 
         int baseLine = 0;
         cv::Size label_size = cv::getTextSize(text, cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseLine);

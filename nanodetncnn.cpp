@@ -77,11 +77,7 @@ static void on_image_render(cv::Mat &rgba)
     if (!g_nanodet)
     {
         g_nanodet = new NanoDet;
-
-        static const float mean_vals[3] = {103.53f, 116.28f, 123.675f};
-        static const float norm_vals[3] = {1.f / 57.375f, 1.f / 57.12f, 1.f / 58.395f};
-
-        g_nanodet->load("Head.torchscript.ncnn", 416, mean_vals, norm_vals);
+        g_nanodet->load("coco.torchscript.ncnn");
     }
 
     std::vector<Object> objects;
