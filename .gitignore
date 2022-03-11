@@ -1,18 +1,10 @@
-.github
+# IDE
 .vscode
 
-
-Head_v0.1/
-coco/
-plus_coco/
+# CMake build directory
 build/
-nanodet-plus/
+
+# files
 deploy/
+model/
 ncnn-20220216-webassembly/
-test.py
-nanodet/
-Head_plus/
-nanodetplus_pnnx.cpp
-boot.sh
-build.sh
-pnnx/
