@@ -16,7 +16,7 @@
 #include <simpleocv.h>
 #include "nanodet.h"
 
-static int draw_fps(cv::Mat &rgba)
+static int draw_fps(cv::Mat& rgba)
 {
     // resolve moving average
     float avg_fps = 0.f;
@@ -70,9 +70,9 @@ static int draw_fps(cv::Mat &rgba)
     return 0;
 }
 
-static NanoDet *g_nanodet = 0;
+static NanoDet* g_nanodet = 0;
 
-static void on_image_render(cv::Mat &rgba)
+static void on_image_render(cv::Mat& rgba)
 {
     if (!g_nanodet)
     {
@@ -90,7 +90,7 @@ static void on_image_render(cv::Mat &rgba)
 
 #ifdef __EMSCRIPTEN_PTHREADS__
 
-static const unsigned char *rgba_data = 0;
+static const unsigned char* rgba_data = 0;
 static int w = 0;
 static int h = 0;
 
@@ -110,7 +110,7 @@ static void worker()
             condition.wait(lock);
         }
 
-        cv::Mat rgba(h, w, CV_8UC4, (void *)rgba_data);
+        cv::Mat rgba(h, w, CV_8UC4, (void*)rgba_data);
 
         on_image_render(rgba);
 
@@ -127,10 +127,9 @@ static void worker()
 #include <thread>
 static std::thread t(worker);
 
-extern "C"
-{
+extern "C" {
 
-    void nanodet_ncnn(unsigned char *_rgba_data, int _w, int _h)
+void nanodet_ncnn(unsigned char* _rgba_data, int _w, int _h)
     {
         lock.lock();
         while (rgba_data != 0)
@@ -154,19 +153,20 @@ extern "C"
         }
         finish_lock.unlock();
     }
+
 }
 
 #else // __EMSCRIPTEN_PTHREADS__
 
-extern "C"
-{
+extern "C" {
 
-    void nanodet_ncnn(unsigned char *rgba_data, int w, int h)
+void nanodet_ncnn(unsigned char* rgba_data, int w, int h)
     {
-        cv::Mat rgba(h, w, CV_8UC4, (void *)rgba_data);
+    cv::Mat rgba(h, w, CV_8UC4, (void*)rgba_data);
 
         on_image_render(rgba);
     }
+
 }
 
 #endif // __EMSCRIPTEN_PTHREADS__
