@@ -30,7 +30,7 @@ class NanoDet
 public:
     NanoDet();
 
-    int load(const char* modeltype, int target_size, const float* mean_vals, const float* norm_vals, bool use_gpu = false);
+    int load(const char* modeltype, bool use_gpu = false);
 
     int detect(const cv::Mat& rgba, std::vector<Object>& objects, float prob_threshold = 0.4f, float nms_threshold = 0.5f);
 
@@ -38,9 +38,25 @@ public:
 
 private:
     ncnn::Net nanodet;
-    int target_size;
-    float mean_vals[3];
-    float norm_vals[3];
+    int target_size = 416;
+    std::vector<int> strides = {8, 16, 32, 64};
+    std::vector<std::string> class_names{
+        "person", "bicycle", "car", "motorcycle", "airplane", "bus",
+        "train", "truck", "boat", "traffic light", "fire hydrant",
+        "stop sign", "parking meter", "bench", "bird", "cat", "dog",
+        "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe",
+        "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
+        "skis", "snowboard", "sports ball", "kite", "baseball bat",
+        "baseball glove", "skateboard", "surfboard", "tennis racket",
+        "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl",
+        "banana", "apple", "sandwich", "orange", "broccoli", "carrot",
+        "hot dog", "pizza", "donut", "cake", "chair", "couch",
+        "potted plant", "bed", "dining table", "toilet", "tv", "laptop",
+        "mouse", "remote", "keyboard", "cell phone", "microwave", "oven",
+        "toaster", "sink", "refrigerator", "book", "clock", "vase",
+        "scissors", "teddy bear", "hair drier", "toothbrush"};
+    float mean_vals[3] = {103.53f, 116.28f, 123.675f};
+    float norm_vals[3] = {1.f / 57.375f, 1.f / 57.12f, 1.f / 58.395f};
     ncnn::UnlockedPoolAllocator blob_pool_allocator;
     ncnn::PoolAllocator workspace_pool_allocator;
 };

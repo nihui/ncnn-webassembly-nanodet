@@ -1,0 +1,10 @@
+# IDE
+.vscode
+
+# CMake build directory
+build/
+
+# files
+deploy/
+model/
+ncnn-20220216-webassembly/
