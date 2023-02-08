@@ -21,14 +21,20 @@ cd emsdk
 source emsdk/emsdk_env.sh
 ```
 
-2. Download and extract ncnn webassembly package
+2. clone this repo
+```shell
+git clone https://github.com/Justin-Xiang/ncnn-webassembly-nanodet.git
+```
+
+3. Enter the repo direcroty and Download and extract ncnn webassembly package
 
 ```shell
+cd ncnn-webassembly-nanodet
 wget https://github.com/Tencent/ncnn/releases/download/20220216/ncnn-20220216-webassembly.zip
 unzip ncnn-20220216-webassembly.zip
 ```
 
-3. Build four WASM feature variants
+4. Build four WASM feature variants
 
 ```shell
 mkdir build
@@ -43,7 +49,7 @@ cmake -DCMAKE_TOOLCHAIN_FILE=$EMSDK/upstream/emscripten/cmake/Modules/Platform/E
 make -j4
 ```
 
-4. Deploy the _.data _.js _.wasm and _.html files to your web server
+5. Deploy the _.data _.js _.wasm and _.html files to your web server(you can find them in /build directory and this repo)
 
 ```
 # deploy files
@@ -66,13 +72,13 @@ deploy/
 └── wasmFeatureDetect.js
 ```
 
-5. Deploy local server(python3 as a example)
+6. Deploy local server(python3 as a example)
 
 ```
 python3 -m http.server --directory deploy
 ```
 
-6. Access local server(chrome as a example)
+7. Access local server(chrome as a example)
 
 ```
 # launch chrome browser, enter following command to address bar and press ENTER:
