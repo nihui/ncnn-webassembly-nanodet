@@ -22,6 +22,7 @@ source emsdk/emsdk_env.sh
 ```
 
 2. clone this repo
+   
 ```shell
 git clone https://github.com/Justin-Xiang/ncnn-webassembly-nanodet.git
 ```
@@ -37,7 +38,7 @@ unzip ncnn-20220216-webassembly.zip
 4. Build four WASM feature variants
 
 ```shell
-mkdir build
+mkdir build # in ncnn-webassembly-nanodet directory
 cd build
 cmake -DCMAKE_TOOLCHAIN_FILE=$EMSDK/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake -DWASM_FEATURE=basic ..
 make -j4
