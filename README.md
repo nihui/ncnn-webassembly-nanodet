@@ -24,7 +24,7 @@ source emsdk/emsdk_env.sh
 2. clone this repo
    
 ```shell
-git clone https://github.com/Justin-Xiang/ncnn-webassembly-nanodet.git
+git clone https://github.com/nihui/ncnn-webassembly-nanodet.git
 ```
 
 3. Enter the repo direcroty and Download and extract ncnn webassembly package
