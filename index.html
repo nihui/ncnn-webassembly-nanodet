@@ -136,11 +136,11 @@
                 function mallocAndCallSFilter() {
                     if (dst != null)
                     {
-                        _free(dst);
+                        Module._free(dst);
                         dst = null;
                     }
 
-                    dst = _malloc(d.length);
+                    dst = Module._malloc(d.length);
 
                     //console.log("What " + d.length);
 
@@ -193,11 +193,11 @@
             var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             var data = imageData.data;
 
-            HEAPU8.set(data, dst);
+            Module.HEAPU8.set(data, dst);
 
-            _nanodet_ncnn(dst, canvas.width, canvas.height);
+            Module._nanodet_ncnn(dst, canvas.width, canvas.height);
 
-            var result = HEAPU8.subarray(dst, dst + data.length);
+            var result = Module.HEAPU8.subarray(dst, dst + data.length);
             imageData.data.set(result);
             ctx.putImageData(imageData, 0, 0);
         }

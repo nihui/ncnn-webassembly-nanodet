@@ -14,6 +14,7 @@
 
 #include "nanodet.h"
 
+#include <algorithm>
 #include <float.h>
 #include <cpu.h>
 #include <simpleocv.h>
@@ -211,7 +212,10 @@ int NanoDet::load(const char* modeltype, bool use_gpu)
     workspace_pool_allocator.clear();
 
     ncnn::set_cpu_powersave(2);
-    ncnn::set_omp_num_threads(ncnn::get_big_cpu_count());
+    // The browser prestarts four pthreads: one inference worker and three
+    // OpenMP workers. Do not request more while the main thread is blocked.
+    const int num_threads = std::min(4, ncnn::get_big_cpu_count());
+    ncnn::set_omp_num_threads(num_threads);
 
     nanodet.opt = ncnn::Option();
 
@@ -219,7 +223,7 @@ int NanoDet::load(const char* modeltype, bool use_gpu)
     nanodet.opt.use_vulkan_compute = use_gpu;
 #endif
 
-    nanodet.opt.num_threads = ncnn::get_big_cpu_count();
+    nanodet.opt.num_threads = num_threads;
     nanodet.opt.blob_allocator = &blob_pool_allocator;
     nanodet.opt.workspace_allocator = &workspace_pool_allocator;
 

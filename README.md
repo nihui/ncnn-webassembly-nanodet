@@ -10,86 +10,70 @@ open https://nihui.github.io/ncnn-webassembly-nanodet and enjoy
 
 # build and deploy
 
-1. Install emscripten
+Uses the ncnn **20261020** official WebAssembly prebuilt SDK and **Emscripten 6.0.12**.
+The existing wasm32 basic, SIMD, threads and SIMD+threads variants are retained;
+ncnn itself does not need to be built from source.
+
+1. Install and activate the matching Emscripten toolchain:
 
 ```shell
 git clone https://github.com/emscripten-core/emsdk.git
-cd emsdk
-./emsdk install 3.1.28
-./emsdk activate 3.1.28
-
+./emsdk/emsdk install 6.0.12
+./emsdk/emsdk activate 6.0.12
 source emsdk/emsdk_env.sh
 ```
 
-2. clone this repo
-   
+2. Clone this repository and extract the ncnn SDK inside it:
+
 ```shell
 git clone https://github.com/nihui/ncnn-webassembly-nanodet.git
+cd ncnn-webassembly-nanodet
+curl -fL -o ncnn.zip https://github.com/Tencent/ncnn/releases/download/20261020/ncnn-20261020-webassembly.zip
+unzip -q ncnn.zip
 ```
 
-3. Enter the repo direcroty and Download and extract ncnn webassembly package
+3. Build with CMake 3.13 or newer. Use a separate build directory for each
+variant so cached package paths and compiler flags cannot leak between variants:
 
 ```shell
-wget https://github.com/Tencent/ncnn/releases/download/20230223/ncnn-20230223-webassembly.zip
-unzip ncnn-20230223-webassembly.zip
+for feature in basic simd threads simd-threads; do
+    emcmake cmake -S . -B "build/$feature" -DWASM_FEATURE="$feature"
+    cmake --build "build/$feature" --parallel 4
+done
 ```
 
-4. Build four WASM feature variants
+4. Collect the generated files and serve the demo:
 
 ```shell
-mkdir build # in ncnn-webassembly-nanodet directory
-cd build
-cmake -DCMAKE_TOOLCHAIN_FILE=$EMSDK/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake -DWASM_FEATURE=basic ..
-make -j4
-cmake -DCMAKE_TOOLCHAIN_FILE=$EMSDK/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake -DWASM_FEATURE=simd ..
-make -j4
-cmake -DCMAKE_TOOLCHAIN_FILE=$EMSDK/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake -DWASM_FEATURE=threads ..
-make -j4
-cmake -DCMAKE_TOOLCHAIN_FILE=$EMSDK/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake -DWASM_FEATURE=simd-threads ..
-make -j4
-```
-
-5. Deploy the _.data _.js _.wasm and _.html files to your web server(you can find them in /build directory and this repo)
-
-```
-# deploy files
-deploy/
-├── index.html
-├── nanodet-basic.data
-├── nanodet-basic.js
-├── nanodet-basic.wasm
-├── nanodet-simd.data
-├── nanodet-simd.js
-├── nanodet-simd-threads.data
-├── nanodet-simd-threads.js
-├── nanodet-simd-threads.wasm
-├── nanodet-simd-threads.worker.js
-├── nanodet-simd.wasm
-├── nanodet-threads.data
-├── nanodet-threads.js
-├── nanodet-threads.wasm
-├── nanodet-threads.worker.js
-└── wasmFeatureDetect.js
-```
-
-6. Deploy local server(python3 as a example)
-
-```
+mkdir -p deploy
+cp build/*/*.data build/*/*.js build/*/*.wasm deploy/
+cp index.html wasmFeatureDetect.js deploy/
 python3 -m http.server --directory deploy
 ```
 
-7. Access local server(chrome as a example)
+Open http://localhost:8000 and allow camera access. Camera access requires
+localhost or HTTPS; use HTTPS when serving from another computer rather than
+disabling browser security. Emscripten 6 embeds pthread worker startup in the
+main generated JavaScript, so separate `*.worker.js` files are not required.
 
+The page selects the supported SIMD/thread variant automatically. Threads
+require cross-origin isolation: configure the web server to send
+`Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp`. The simple Python server above
+does not set these headers, so the page uses a non-threaded variant. The
+threaded build uses at most four prestarted pthreads (one inference worker
+and up to three OpenMP workers).
+
+## Validation
+
+The pull-request workflow builds all four variants and runs Chromium inference
+smoke tests without requesting camera access. To run the same tests locally
+after collecting `deploy/`:
+
+```shell
+npm install --no-save --package-lock=false playwright@1.56.1
+npx playwright install --with-deps chromium
+node tests/browser-smoke.cjs deploy
 ```
-# launch chrome browser, enter following command to address bar and press ENTER:
-chrome://flags/#unsafely-treat-insecure-origin-as-secure
 
-# enter following keyword to "Search flags" and press ENTER:
-"insecure origins"
-you will find "Insecure origins treated as secure" key
-
-#enter local server url and click right side dropdown list, select "Enabled"
-url example: http://192.168.1.100:8000
-
-#relaunch chrome browser and access http://192.168.1.100:8000 (replace 192.168.1.100 with your local ip)
-```
+Only pushes to `master` deploy to `gh-pages`; pull requests only build and test.

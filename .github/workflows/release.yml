@@ -1,51 +1,70 @@
 name: build-and-deploy
+
 on:
   push:
-    branches:
-      - master
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
 
 env:
-  EMSCRIPTEN_VERSION: 3.1.28
+  EMSCRIPTEN_VERSION: 6.0.12
+  NCNN_VERSION: 20261020
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - name: emsdk
       run: |
-        git clone https://github.com/emscripten-core/emsdk.git
-        cd emsdk
-        ./emsdk install $EMSCRIPTEN_VERSION
-        ./emsdk activate $EMSCRIPTEN_VERSION
-
-    - name: ncnn
+        git clone --depth 1 https://github.com/emscripten-core/emsdk.git
+        emsdk/emsdk install "$EMSCRIPTEN_VERSION"
+        emsdk/emsdk activate "$EMSCRIPTEN_VERSION"
+    - name: ncnn prebuilt SDK
       run: |
-        wget -q https://github.com/Tencent/ncnn/releases/download/20230223/ncnn-20230223-webassembly.zip
-        unzip -q ncnn-20230223-webassembly.zip
-
-    - name: build
+        curl --fail --location --retry 3 -o ncnn.zip "https://github.com/Tencent/ncnn/releases/download/${NCNN_VERSION}/ncnn-${NCNN_VERSION}-webassembly.zip"
+        unzip -q ncnn.zip
+    - name: Build all four variants
       run: |
         source emsdk/emsdk_env.sh
-        mkdir build && cd build
-        cmake -DCMAKE_TOOLCHAIN_FILE=$EMSDK/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake -DWASM_FEATURE=basic ..
-        make -j4
-        cmake -DCMAKE_TOOLCHAIN_FILE=$EMSDK/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake -DWASM_FEATURE=simd ..
-        make -j4
-        cmake -DCMAKE_TOOLCHAIN_FILE=$EMSDK/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake -DWASM_FEATURE=threads ..
-        make -j4
-        cmake -DCMAKE_TOOLCHAIN_FILE=$EMSDK/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake -DWASM_FEATURE=simd-threads ..
-        make -j4
-
-    - name: collect-deploy-files
+        for feature in basic simd threads simd-threads; do
+          emcmake cmake -S . -B "build/$feature" -DWASM_FEATURE="$feature"
+          cmake --build "build/$feature" --parallel 4
+        done
+    - name: Collect deploy files
       run: |
-        mkdir deploy && cd deploy
-        cp ../build/*.data .
-        cp ../build/*.js .
-        cp ../build/*.wasm .
-        cp ../*.html .
-        cp ../*.js .
+        mkdir deploy
+        cp build/*/*.data build/*/*.js build/*/*.wasm deploy/
+        cp index.html wasmFeatureDetect.js deploy/
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+    - name: Browser inference smoke test
+      run: |
+        npm install --no-save --package-lock=false playwright@1.56.1
+        npx playwright install --with-deps chromium
+        node tests/browser-smoke.cjs deploy
+    - name: Upload site
+      uses: actions/upload-artifact@v4
+      with:
+        name: site
+        path: deploy
 
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/download-artifact@v4
+      with:
+        name: site
+        path: deploy
     - name: deploy
       uses: JamesIves/github-pages-deploy-action@4.1.1
       with:
