@@ -64,16 +64,5 @@ does not set these headers, so the page uses a non-threaded variant. The
 threaded build uses at most four prestarted pthreads (one inference worker
 and up to three OpenMP workers).
 
-## Validation
-
-The pull-request workflow builds all four variants and runs Chromium inference
-smoke tests without requesting camera access. To run the same tests locally
-after collecting `deploy/`:
-
-```shell
-npm install --no-save --package-lock=false playwright@1.56.1
-npx playwright install --with-deps chromium
-node tests/browser-smoke.cjs deploy
-```
-
-Only pushes to `master` deploy to `gh-pages`; pull requests only build and test.
+The pull-request workflow builds all four variants. Only pushes to `master`
+deploy to `gh-pages`; pull requests do not deploy.

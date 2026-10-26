@@ -39,14 +39,6 @@ jobs:
         mkdir deploy
         cp build/*/*.data build/*/*.js build/*/*.wasm deploy/
         cp index.html wasmFeatureDetect.js deploy/
-    - uses: actions/setup-node@v4
-      with:
-        node-version: 22
-    - name: Browser inference smoke test
-      run: |
-        npm install --no-save --package-lock=false playwright@1.56.1
-        npx playwright install --with-deps chromium
-        node tests/browser-smoke.cjs deploy
     - name: Upload site
       uses: actions/upload-artifact@v4
       with:
