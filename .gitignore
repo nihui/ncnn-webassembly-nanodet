@@ -9,5 +9,5 @@ deploy/
 model/
 ncnn-20220216-webassembly/
 
-ncnn-*-webassembly/
+ncnn-*-webassembly*/
 emsdk/

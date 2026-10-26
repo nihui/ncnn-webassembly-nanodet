@@ -27,12 +27,16 @@ jobs:
       run: |
         curl --fail --location --retry 3 -o ncnn.zip "https://github.com/Tencent/ncnn/releases/download/${NCNN_VERSION}/ncnn-${NCNN_VERSION}-webassembly.zip"
         unzip -q ncnn.zip
-    - name: Build all four variants
+        curl --fail --location --retry 3 -o ncnn64.zip "https://github.com/Tencent/ncnn/releases/download/${NCNN_VERSION}/ncnn-${NCNN_VERSION}-webassembly64.zip"
+        unzip -q ncnn64.zip
+    - name: Build all eight variants
       run: |
         source emsdk/emsdk_env.sh
         for feature in basic simd threads simd-threads; do
           emcmake cmake -S . -B "build/$feature" -DWASM_FEATURE="$feature"
           cmake --build "build/$feature" --parallel 4
+          emcmake cmake -S . -B "build/wasm64-$feature" -DWASM_FEATURE="$feature" -DWASM64=ON
+          cmake --build "build/wasm64-$feature" --parallel 4
         done
     - name: Collect deploy files
       run: |
