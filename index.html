@@ -44,7 +44,7 @@
             for (var i = 0; i < wasmModuleLoadedCallbacks.length; i++) {
                 wasmModuleLoadedCallbacks[i]();
             }
-        }
+        };
 
         (async function() {
             has_simd = await wasmFeatureDetect.simd();
