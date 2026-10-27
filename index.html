@@ -45,6 +45,10 @@
             min-height: 48px;
             pointer-events: auto;
         }
+        #fullscreen-status {
+            flex-basis: 100%;
+            font-size: 14px;
+        }
         video {
             /* Keep the source video rendered for Safari camera frames (see issue #17). */
             position: absolute;
@@ -69,6 +73,8 @@
         <div id="controls">
             <h1>ncnn webassembly nanodet</h1>
             <button disabled id="switch-camera-btn">Switch Camera</button>
+            <button id="fullscreen-btn" aria-pressed="false">全屏显示</button>
+            <span id="fullscreen-status" role="status"></span>
         </div>
         <canvas id="canvas" width="640"></canvas>
         <video id="video" playsinline autoplay muted></video>
@@ -130,56 +136,50 @@
 
         var shouldFaceUser = true;
         var stream = null;
-        var w = 640;
-        var h = 480;
+        // Match NanoDet::target_size; do not scale inference with screen pixels or DPR.
+        var inputLongEdge = 416;
+        var animationFrame = null;
 
         var dst = null;
         var resultarray = null;
         var resultbuffer = null;
         window.addEventListener('DOMContentLoaded', function() {
-            var isStreaming = false;
             switchcamerabtn = document.getElementById('switch-camera-btn');
             video = document.getElementById('video');
             canvas = document.getElementById('canvas');
             ctx = canvas.getContext('2d');
 
-            // Wait until the video stream canvas play
-            video.addEventListener('canplay', function(e) {
-                if (!isStreaming) {
-                    // videoWidth isn't always set correctly in all browsers
-                    if (video.videoWidth > 0) h = video.videoHeight / (video.videoWidth / w);
-                    canvas.setAttribute('width', w);
-                    canvas.setAttribute('height', h);
-                    isStreaming = true;
-                }
-            }, false);
+            // A single frame chain survives camera switches without duplicate inference.
+            video.addEventListener('play', scheduleFrame);
+            video.addEventListener('canplay', scheduleFrame);
+            if (wasmModuleLoaded) scheduleFrame();
+            else wasmModuleLoadedCallbacks.push(scheduleFrame);
 
-            // Wait for the video to start to play
-            video.addEventListener('play', function() {
-                //Setup image memory
-                var id = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                var d = id.data;
-
-                if (wasmModuleLoaded) {
-                    mallocAndCallSFilter();
-                } else {
-                    wasmModuleLoadedCallbacks.push(mallocAndCallSFilter);
-                }
-
-                function mallocAndCallSFilter() {
-                    if (dst != null)
-                    {
-                        Module._free(dst);
-                        dst = null;
-                    }
-
-                    dst = Module._malloc(d.length);
-
-                    //console.log("What " + d.length);
-
-                    sFilter();
+            var app = document.getElementById('app');
+            var fullscreenButton = document.getElementById('fullscreen-btn');
+            var fullscreenStatus = document.getElementById('fullscreen-status');
+            if (!app.requestFullscreen || !document.fullscreenEnabled) {
+                fullscreenButton.disabled = true;
+                fullscreenStatus.textContent = '当前浏览器不支持页面全屏，画面仍会适配可用窗口。';
+            }
+            fullscreenButton.addEventListener('click', async function() {
+                fullscreenStatus.textContent = '';
+                try {
+                    if (document.fullscreenElement) await document.exitFullscreen();
+                    else await app.requestFullscreen();
+                } catch (err) {
+                    console.error('Unable to change fullscreen mode:', err);
+                    fullscreenStatus.textContent = '无法切换全屏：' + err.message;
                 }
             });
+            document.addEventListener('fullscreenchange', function() {
+                var active = document.fullscreenElement === app;
+                fullscreenButton.textContent = active ? '退出全屏' : '全屏显示';
+                fullscreenButton.setAttribute('aria-pressed', String(active));
+                scheduleFrame();
+            });
+            window.addEventListener('resize', scheduleFrame);
+            if (window.visualViewport) window.visualViewport.addEventListener('resize', scheduleFrame);
 
             // check whether we can use facingMode
             var supports = navigator.mediaDevices.getSupportedConstraints();
@@ -237,17 +237,55 @@
             ctx.putImageData(imageData, 0, 0);
         }
 
-        //Request Animation Frame function
-        var sFilter = function() {
-            if (video.paused || video.ended) return;
-
-            ctx.fillRect(0, 0, w, h);
-            ctx.drawImage(video, 0, 0, w, h);
-
-            ncnn_nanodet();
-
-            window.requestAnimationFrame(sFilter);
+        function scheduleFrame() {
+            if (animationFrame === null) animationFrame = window.requestAnimationFrame(sFilter);
         }
+
+        // Crop before inference, so only the viewport's field of view is processed.
+        function frameGeometry(sourceWidth, sourceHeight, viewportWidth, viewportHeight) {
+            if (sourceWidth <= 0 || sourceHeight <= 0 || viewportWidth <= 0 || viewportHeight <= 0) return null;
+            var aspect = viewportWidth / viewportHeight;
+            var width = aspect >= 1 ? inputLongEdge : Math.max(1, Math.round(inputLongEdge * aspect));
+            var height = aspect >= 1 ? Math.max(1, Math.round(inputLongEdge / aspect)) : inputLongEdge;
+            // Use the integer input aspect for a distortion-free source-to-input mapping.
+            var inputAspect = width / height;
+            var cropWidth = Math.min(sourceWidth, sourceHeight * inputAspect);
+            var cropHeight = cropWidth / inputAspect;
+            return {
+                x: (sourceWidth - cropWidth) / 2,
+                y: (sourceHeight - cropHeight) / 2,
+                width: cropWidth, height: cropHeight,
+                inputWidth: width, inputHeight: height
+            };
+        }
+
+        var sFilter = function() {
+            animationFrame = null;
+            if (video.paused || video.ended || !wasmModuleLoaded) return;
+            var app = document.getElementById('app');
+            var geometry = frameGeometry(video.videoWidth, video.videoHeight, app.clientWidth, app.clientHeight);
+            if (!geometry || video.readyState < 2) {
+                scheduleFrame();
+                return;
+            }
+
+            if (dst === null || canvas.width !== geometry.inputWidth || canvas.height !== geometry.inputHeight) {
+                var next = Module._malloc(geometry.inputWidth * geometry.inputHeight * 4);
+                if (!next) {
+                    console.error('Unable to allocate camera frame buffer');
+                    return;
+                }
+                if (dst !== null) Module._free(dst);
+                dst = next;
+                canvas.width = geometry.inputWidth;
+                canvas.height = geometry.inputHeight;
+            }
+
+            ctx.drawImage(video, geometry.x, geometry.y, geometry.width, geometry.height,
+                          0, 0, canvas.width, canvas.height);
+            ncnn_nanodet();
+            scheduleFrame();
+        };
 
     </script>
 
