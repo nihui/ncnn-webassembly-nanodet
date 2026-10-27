@@ -7,6 +7,20 @@
 })(this, function () {
   "use strict";
   return {
+    memory64: async (shared = false) => {
+      try {
+        return typeof BigInt === "function" && WebAssembly.validate(
+          new Uint8Array([
+            0, 97, 115, 109, 1, 0, 0, 0,
+            // One memory: i64 limits, optionally shared with a maximum.
+            5, shared ? 4 : 3, 1, shared ? 7 : 4, 1,
+            ...(shared ? [1] : []),
+          ])
+        );
+      } catch (e) {
+        return false;
+      }
+    },
     bigInt: () =>
       (async (e) => {
         try {

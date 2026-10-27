@@ -46,53 +46,40 @@
             }
         }
 
-        wasmFeatureDetect.simd().then(simdSupported => {
-            has_simd = simdSupported;
+        (async function() {
+            has_simd = await wasmFeatureDetect.simd();
+            has_threads = window.crossOriginIsolated === true && await wasmFeatureDetect.threads();
+            var feature = has_simd ? 'simd' : 'basic';
+            if (has_threads) feature = has_simd ? 'simd-threads' : 'threads';
 
-            wasmFeatureDetect.threads().then(threadsSupported => {
-                has_threads = threadsSupported;
+            // Shared memory64 is a separate capability from ordinary memory64.
+            var use_wasm64 = await wasmFeatureDetect.memory64(has_threads);
+            async function fetchBinary(name) {
+                var response = await fetch(name + '.wasm');
+                if (!response.ok) throw new Error('Unable to load ' + name + ': HTTP ' + response.status);
+                return response.arrayBuffer();
+            }
 
-                if (has_simd)
-                {
-                    if (has_threads)
-                    {
-                        nanodet_module_name = 'nanodet-simd-threads';
-                    }
-                    else
-                    {
-                        nanodet_module_name = 'nanodet-simd';
-                    }
-                }
-                else
-                {
-                    if (has_threads)
-                    {
-                        nanodet_module_name = 'nanodet-threads';
-                    }
-                    else
-                    {
-                        nanodet_module_name = 'nanodet-basic';
-                    }
-                }
+            nanodet_module_name = 'nanodet-' + (use_wasm64 ? 'wasm64-' : '') + feature;
+            var buffer = await fetchBinary(nanodet_module_name);
+            // Verify the complete binary before loading any JS/global state.
+            // A small capability probe cannot cover every emitted instruction.
+            if (use_wasm64 && !WebAssembly.validate(buffer)) {
+                nanodet_module_name = 'nanodet-' + feature;
+                buffer = await fetchBinary(nanodet_module_name);
+            }
+            if (!WebAssembly.validate(buffer)) throw new Error('Unsupported WebAssembly module: ' + nanodet_module_name);
 
-                console.log('load ' + nanodet_module_name);
-
-                var nanodetwasm = nanodet_module_name + '.wasm';
-                var nanodetjs = nanodet_module_name + '.js';
-
-                fetch(nanodetwasm)
-                    .then(response => response.arrayBuffer())
-                    .then(buffer => {
-                        Module.wasmBinary = buffer;
-                        var script = document.createElement('script');
-                        script.src = nanodetjs;
-                        script.onload = function() {
-                            console.log('Emscripten boilerplate loaded.');
-                        }
-                        document.body.appendChild(script);
-                    });
-
-            });
+            console.log('load ' + nanodet_module_name);
+            Module.wasmBinary = buffer;
+            var script = document.createElement('script');
+            script.src = nanodet_module_name + '.js';
+            script.onload = function() { console.log('Emscripten boilerplate loaded.'); };
+            script.onerror = function() { console.error('Unable to load ' + script.src); };
+            document.body.appendChild(script);
+        })().catch(function(error) {
+            // Network/runtime failures are not mistaken for missing memory64 support.
+            console.error(error);
         });
 
         var shouldFaceUser = true;
@@ -136,11 +123,11 @@
                 function mallocAndCallSFilter() {
                     if (dst != null)
                     {
-                        _free(dst);
+                        Module._free(dst);
                         dst = null;
                     }
 
-                    dst = _malloc(d.length);
+                    dst = Module._malloc(d.length);
 
                     //console.log("What " + d.length);
 
@@ -193,11 +180,11 @@
             var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             var data = imageData.data;
 
-            HEAPU8.set(data, dst);
+            Module.HEAPU8.set(data, dst);
 
-            _nanodet_ncnn(dst, canvas.width, canvas.height);
+            Module._nanodet_ncnn(dst, canvas.width, canvas.height);
 
-            var result = HEAPU8.subarray(dst, dst + data.length);
+            var result = Module.HEAPU8.subarray(dst, dst + data.length);
             imageData.data.set(result);
             ctx.putImageData(imageData, 0, 0);
         }
