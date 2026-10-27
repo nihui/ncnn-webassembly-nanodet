@@ -6,8 +6,11 @@
     <title>ncnn webassembly nanodet</title>
     <style>
         video {
-/*             position: absolute; */
-/*             visibility: hidden; */
+            /* Keep the source video rendered for Safari camera frames (see issue #17). */
+            position: absolute;
+            opacity: 0;
+            width: 0;
+            height: 0;
         }
         canvas {
             border: 1px solid black;
@@ -25,7 +28,7 @@
         <div>
             <canvas id="canvas" width="640"></canvas>
         </div>
-        <video id="video" playsinline autoplay></video>
+        <video id="video" playsinline autoplay muted></video>
     </div>
 
     <script src="wasmFeatureDetect.js"></script>
@@ -164,7 +167,9 @@
                     stream = mediaStream;
                     video.srcObject = mediaStream;
                     video.onloadedmetadata = function(e) {
-                        video.play();
+                        video.play().catch(function(err) {
+                            console.error('Unable to start camera playback:', err);
+                        });
                     };
                 })
                 .catch(function(err) {
