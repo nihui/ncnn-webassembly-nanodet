@@ -73,7 +73,7 @@
         <div id="controls">
             <h1>ncnn webassembly nanodet</h1>
             <button disabled id="switch-camera-btn">Switch Camera</button>
-            <button id="fullscreen-btn" aria-pressed="false">全屏显示</button>
+            <button id="fullscreen-btn" aria-pressed="false">Fullscreen</button>
             <span id="fullscreen-status" role="status"></span>
         </div>
         <canvas id="canvas" width="640"></canvas>
@@ -160,7 +160,7 @@
             var fullscreenStatus = document.getElementById('fullscreen-status');
             if (!app.requestFullscreen || !document.fullscreenEnabled) {
                 fullscreenButton.disabled = true;
-                fullscreenStatus.textContent = '当前浏览器不支持页面全屏，画面仍会适配可用窗口。';
+                fullscreenStatus.textContent = 'This browser does not support page fullscreen. The view will still fit the available window.';
             }
             fullscreenButton.addEventListener('click', async function() {
                 fullscreenStatus.textContent = '';
@@ -169,12 +169,12 @@
                     else await app.requestFullscreen();
                 } catch (err) {
                     console.error('Unable to change fullscreen mode:', err);
-                    fullscreenStatus.textContent = '无法切换全屏：' + err.message;
+                    fullscreenStatus.textContent = 'Unable to change fullscreen mode: ' + err.message;
                 }
             });
             document.addEventListener('fullscreenchange', function() {
                 var active = document.fullscreenElement === app;
-                fullscreenButton.textContent = active ? '退出全屏' : '全屏显示';
+                fullscreenButton.textContent = active ? 'Exit fullscreen' : 'Fullscreen';
                 fullscreenButton.setAttribute('aria-pressed', String(active));
                 scheduleFrame();
             });
