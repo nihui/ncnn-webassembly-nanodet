@@ -12,15 +12,24 @@
             overflow: hidden;
             background: black;
         }
-        #app {
+        #viewport {
             position: fixed;
             inset: 0;
             width: 100%;
             height: 100vh;
             height: 100dvh;
             overflow: hidden;
+        }
+        #app {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            width: 100%;
+            height: 100%;
+            transform: translate(-50%, -50%) rotate(var(--app-rotation, 0deg));
             display: flex;
             flex-direction: column;
+            overflow: hidden;
         }
         #controls {
             flex: 0 0 auto;
@@ -28,9 +37,9 @@
             max-height: 50%;
             overflow: auto;
             padding: 12px;
-            padding-top: max(12px, env(safe-area-inset-top));
-            padding-left: max(12px, env(safe-area-inset-left));
-            padding-right: max(12px, env(safe-area-inset-right));
+            padding-top: max(12px, var(--safe-top, env(safe-area-inset-top)));
+            padding-left: max(12px, var(--safe-left, env(safe-area-inset-left)));
+            padding-right: max(12px, var(--safe-right, env(safe-area-inset-right)));
             display: flex;
             flex-wrap: wrap;
             align-items: center;
@@ -70,7 +79,9 @@
         }
         canvas {
             position: absolute;
-            inset: 0;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%) rotate(var(--canvas-rotation, 0deg));
             display: block;
             width: 100%;
             height: 100%;
@@ -83,6 +94,7 @@
 </head>
 
 <body>
+    <div id="viewport">
     <div id="app">
         <div id="controls">
             <h1>ncnn webassembly nanodet</h1>
@@ -96,6 +108,7 @@
             <canvas id="canvas" width="640"></canvas>
         </div>
         <video id="video" playsinline autoplay muted></video>
+    </div>
     </div>
 
     <script src="wasmFeatureDetect.js"></script>
@@ -182,7 +195,7 @@
             if (wasmModuleLoaded) scheduleFrame();
             else wasmModuleLoadedCallbacks.push(scheduleFrame);
 
-            var app = document.getElementById('app');
+            var app = document.getElementById('viewport');
             var fullscreenButton = document.getElementById('fullscreen-btn');
             var fullscreenStatus = document.getElementById('fullscreen-status');
             if (!app.requestFullscreen || !document.fullscreenEnabled) {
@@ -203,10 +216,10 @@
                 var active = document.fullscreenElement === app;
                 fullscreenButton.textContent = active ? 'Exit fullscreen' : 'Fullscreen';
                 fullscreenButton.setAttribute('aria-pressed', String(active));
-                scheduleFrame();
+                refreshLayout();
             });
-            window.addEventListener('resize', scheduleFrame);
-            if (window.visualViewport) window.visualViewport.addEventListener('resize', scheduleFrame);
+            window.addEventListener('resize', refreshLayout);
+            if (window.visualViewport) window.visualViewport.addEventListener('resize', refreshLayout);
 
             var motionButton = document.getElementById('motion-btn');
             if (!window.DeviceMotionEvent || !window.isSecureContext || screenAngle() === null) {
@@ -246,8 +259,8 @@
                 }
             });
             window.addEventListener('devicemotion', onMotion);
-            window.addEventListener('orientationchange', checkMotion);
-            if (window.screen.orientation) window.screen.orientation.addEventListener('change', checkMotion);
+            window.addEventListener('orientationchange', refreshLayout);
+            if (window.screen.orientation) window.screen.orientation.addEventListener('change', refreshLayout);
             document.addEventListener('visibilitychange', function() {
                 if (document.hidden && (motion.active || motion.pending)) stopMotion('Auto-rotation paused. Hold upright and enable it again.');
             });
@@ -271,6 +284,7 @@
                 capture();
             });
 
+            refreshLayout();
             capture();
         });
 
@@ -307,6 +321,54 @@
             var result = Module.HEAPU8.subarray(dst, dst + data.length);
             imageData.data.set(result);
             ctx.putImageData(imageData, 0, 0);
+        }
+
+        function phoneLayoutAngle() {
+            // Do not turn a narrow desktop window or a landscape-native tablet.
+            var mobile = navigator.userAgentData ? navigator.userAgentData.mobile :
+                         /iPhone|iPod|Android.*Mobile/.test(navigator.userAgent);
+            if (!mobile || !window.matchMedia('(pointer: coarse)').matches) return 0;
+            var angle = screenAngle();
+            if (angle === null || angle % 90 !== 0) return 0;
+            var orientation = window.screen.orientation;
+            if (orientation && orientation.type) {
+                var portraitType = orientation.type.indexOf('portrait') === 0;
+                if (portraitType !== (angle % 180 === 0)) return 0;
+            }
+            return angle;
+        }
+
+        function updateViewportLayout() {
+            var viewport = document.getElementById('viewport');
+            var app = document.getElementById('app');
+            var view = document.getElementById('camera-view');
+            var angle = phoneLayoutAngle();
+            var sideways = angle === 90 || angle === 270;
+            var width = sideways ? viewport.clientHeight : viewport.clientWidth;
+            var height = sideways ? viewport.clientWidth : viewport.clientHeight;
+            function setStyle(element, property, value) {
+                if (element.style.getPropertyValue(property) !== value) element.style.setProperty(property, value);
+            }
+            // Keep controls at the device's portrait top, not the landscape viewport top.
+            setStyle(app, 'width', width + 'px');
+            setStyle(app, 'height', height + 'px');
+            setStyle(app, '--app-rotation', -angle + 'deg');
+            // Insets are viewport-relative; map them into the counter-rotated app.
+            var edges = ['top', 'right', 'bottom', 'left'];
+            for (var i = 0; i < 4; i++) {
+                setStyle(app, '--safe-' + edges[i], 'env(safe-area-inset-' + edges[(i - angle / 90 + 4) % 4] + ')');
+            }
+            // Cancel only the layout rotation for the image. Do not guess or add
+            // a camera rotation: delivered video and gravity correction stay separate.
+            setStyle(canvas, '--canvas-rotation', angle + 'deg');
+            setStyle(canvas, 'width', (sideways ? view.clientHeight : view.clientWidth) + 'px');
+            setStyle(canvas, 'height', (sideways ? view.clientWidth : view.clientHeight) + 'px');
+        }
+
+        function refreshLayout() {
+            updateViewportLayout();
+            checkMotion();
+            scheduleFrame();
         }
 
         function screenAngle() {
@@ -430,14 +492,16 @@
         var sFilter = function() {
             animationFrame = null;
             if (video.paused || video.ended || !wasmModuleLoaded) return;
+            updateViewportLayout();
             var view = document.getElementById('camera-view');
+            var bounds = view.getBoundingClientRect();
             checkMotion();
             var rotation = motion.rotation;
             var sideways = rotation === 90 || rotation === 270;
             var sourceWidth = video.videoWidth;
             var sourceHeight = video.videoHeight;
             var geometry = frameGeometry(sideways ? sourceHeight : sourceWidth, sideways ? sourceWidth : sourceHeight,
-                                         sideways ? view.clientHeight : view.clientWidth, sideways ? view.clientWidth : view.clientHeight);
+                                         sideways ? bounds.height : bounds.width, sideways ? bounds.width : bounds.height);
             if (!geometry || video.readyState < 2) {
                 scheduleFrame();
                 return;
