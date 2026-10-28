@@ -45,7 +45,7 @@
             min-height: 48px;
             pointer-events: auto;
         }
-        #fullscreen-status {
+        #fullscreen-status, #motion-status {
             flex-basis: 100%;
             font-size: 14px;
         }
@@ -75,6 +75,8 @@
             <button disabled id="switch-camera-btn">Switch Camera</button>
             <button id="fullscreen-btn" aria-pressed="false">Fullscreen</button>
             <span id="fullscreen-status" role="status"></span>
+            <button id="motion-btn" aria-pressed="false">Enable auto-rotation</button>
+            <span id="motion-status" role="status">Hold the device upright and check that the camera view is upright before enabling auto-rotation.</span>
         </div>
         <canvas id="canvas" width="640"></canvas>
         <video id="video" playsinline autoplay muted></video>
@@ -139,6 +141,13 @@
         // Match NanoDet::target_size; do not scale inference with screen pixels or DPR.
         var inputLongEdge = 416;
         var animationFrame = null;
+        var inputCanvas;
+        var inputCtx;
+        var motion = {
+            active: false, pending: false, generation: 0, baseline: null, rotation: 0,
+            candidate: null, candidateSince: 0, lastValid: 0, started: 0,
+            x: null, y: null, screenAngle: null, sourceWidth: 0, sourceHeight: 0, timer: null
+        };
 
         var dst = null;
         var resultarray = null;
@@ -148,6 +157,8 @@
             video = document.getElementById('video');
             canvas = document.getElementById('canvas');
             ctx = canvas.getContext('2d');
+            inputCanvas = document.createElement('canvas');
+            inputCtx = inputCanvas.getContext('2d');
 
             // A single frame chain survives camera switches without duplicate inference.
             video.addEventListener('play', scheduleFrame);
@@ -181,6 +192,50 @@
             window.addEventListener('resize', scheduleFrame);
             if (window.visualViewport) window.visualViewport.addEventListener('resize', scheduleFrame);
 
+            var motionButton = document.getElementById('motion-btn');
+            if (!window.DeviceMotionEvent || !window.isSecureContext || screenAngle() === null) {
+                motionButton.disabled = true;
+                document.getElementById('motion-status').textContent =
+                    'Motion-based rotation is unavailable. The view will follow the browser window.';
+            }
+            motionButton.addEventListener('click', async function() {
+                if (motion.active || motion.pending) {
+                    stopMotion('Auto-rotation disabled.');
+                    return;
+                }
+                if (video.readyState < 2 || video.paused) {
+                    document.getElementById('motion-status').textContent = 'Wait for the camera, then hold it upright and try again.';
+                    return;
+                }
+                var generation = ++motion.generation;
+                motion.pending = true;
+                motionButton.textContent = 'Cancel auto-rotation';
+                document.getElementById('motion-status').textContent = 'Keep the device and camera view upright while granting permission.';
+                try {
+                    if (typeof DeviceMotionEvent.requestPermission === 'function' &&
+                        await DeviceMotionEvent.requestPermission() !== 'granted') {
+                        throw new Error('Motion permission was denied.');
+                    }
+                    if (generation !== motion.generation) return;
+                    motion.pending = false;
+                    motion.active = true;
+                    motion.started = Date.now();
+                    motion.screenAngle = screenAngle();
+                    motion.sourceWidth = video.videoWidth;
+                    motion.sourceHeight = video.videoHeight;
+                    document.getElementById('motion-status').textContent = 'Hold still and upright to calibrate auto-rotation.';
+                    motion.timer = window.setInterval(checkMotion, 250);
+                } catch (err) {
+                    if (generation === motion.generation) stopMotion('Auto-rotation unavailable: ' + err.message);
+                }
+            });
+            window.addEventListener('devicemotion', onMotion);
+            window.addEventListener('orientationchange', checkMotion);
+            if (window.screen.orientation) window.screen.orientation.addEventListener('change', checkMotion);
+            document.addEventListener('visibilitychange', function() {
+                if (document.hidden && (motion.active || motion.pending)) stopMotion('Auto-rotation paused. Hold upright and enable it again.');
+            });
+
             // check whether we can use facingMode
             var supports = navigator.mediaDevices.getSupportedConstraints();
             if (supports['facingMode'] === true) {
@@ -191,6 +246,7 @@
                 if (stream == null)
                     return
 
+                if (motion.active || motion.pending) stopMotion('Camera changed. Hold the new view upright and enable auto-rotation again.');
                 stream.getTracks().forEach(t => {
                     t.stop();
                 });
@@ -222,8 +278,8 @@
 
 
         function ncnn_nanodet() {
-            var canvas = document.getElementById('canvas');
-            var ctx = canvas.getContext('2d');
+            var canvas = inputCanvas;
+            var ctx = inputCtx;
 
             var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             var data = imageData.data;
@@ -235,6 +291,102 @@
             var result = Module.HEAPU8.subarray(dst, dst + data.length);
             imageData.data.set(result);
             ctx.putImageData(imageData, 0, 0);
+        }
+
+        function screenAngle() {
+            var angle = window.screen.orientation && window.screen.orientation.angle;
+            if (!Number.isFinite(angle)) angle = window.orientation;
+            return Number.isFinite(angle) ? (angle % 360 + 360) % 360 : null;
+        }
+
+        function stopMotion(message) {
+            ++motion.generation;
+            window.clearInterval(motion.timer);
+            motion.active = false;
+            motion.pending = false;
+            motion.baseline = null;
+            motion.rotation = 0;
+            motion.candidate = null;
+            motion.x = null;
+            motion.y = null;
+            motion.lastValid = 0;
+            var button = document.getElementById('motion-btn');
+            button.textContent = 'Enable auto-rotation';
+            button.setAttribute('aria-pressed', 'false');
+            document.getElementById('motion-status').textContent = message;
+            scheduleFrame();
+        }
+
+        function checkMotion() {
+            if (!motion.active) return;
+            // The web API does not expose camera sensor orientation. Recalibrate
+            // when the browser may have changed the delivered frame coordinates.
+            if (screenAngle() !== motion.screenAngle ||
+                video.videoWidth !== motion.sourceWidth || video.videoHeight !== motion.sourceHeight) {
+                stopMotion('Screen or camera orientation changed. Hold upright and enable auto-rotation again.');
+            } else if (motion.baseline === null && Date.now() - motion.started > 5000) {
+                stopMotion('No stable motion data. Hold upright and try enabling auto-rotation again.');
+            } else if (motion.baseline !== null && Date.now() - motion.lastValid > 2000) {
+                stopMotion('Motion data is unavailable or unstable. Auto-rotation disabled.');
+            }
+        }
+
+        function onMotion(event) {
+            if (!motion.active) return;
+            checkMotion();
+            if (!motion.active) return;
+            var g = event.accelerationIncludingGravity;
+            if (!g || !Number.isFinite(g.x) || !Number.isFinite(g.y) || !Number.isFinite(g.z)) {
+                motion.candidate = null;
+                motion.x = null;
+                motion.y = null;
+                return;
+            }
+            var magnitude = Math.hypot(g.x, g.y, g.z);
+            // Keep the last stable orientation briefly while flat or shaking.
+            if (magnitude < 7 || magnitude > 12 || Math.hypot(g.x, g.y) < 6) {
+                motion.candidate = null;
+                motion.x = null;
+                motion.y = null;
+                return;
+            }
+            var now = Date.now();
+            motion.lastValid = now;
+            motion.x = motion.x === null ? g.x : motion.x * 0.8 + g.x * 0.2;
+            motion.y = motion.y === null ? g.y : motion.y * 0.8 + g.y * 0.2;
+            var angle = Math.atan2(-motion.x, motion.y) * 180 / Math.PI;
+            var relative = angle - (motion.baseline === null ? 0 : motion.baseline);
+            var next = ((Math.round(relative / 90) * 90) % 360 + 360) % 360;
+            if (motion.baseline !== null) {
+                var difference = ((relative - motion.rotation) % 360 + 540) % 360 - 180;
+                if (Math.abs(difference) < 55) {
+                    motion.candidate = null;
+                    return;
+                }
+            }
+            if (motion.candidate !== next) {
+                motion.candidate = next;
+                motion.candidateSince = now;
+                return;
+            }
+            if (now - motion.candidateSince < 350) return;
+            if (motion.baseline === null) {
+                motion.baseline = next;
+                document.getElementById('motion-btn').textContent = 'Disable auto-rotation';
+                document.getElementById('motion-btn').setAttribute('aria-pressed', 'true');
+                document.getElementById('motion-status').textContent = 'Auto-rotation enabled for this camera and screen orientation.';
+            } else {
+                motion.rotation = next;
+            }
+            motion.candidate = null;
+        }
+
+        // Clockwise quarter turns, with the rotated image kept in positive coordinates.
+        function rotateImage(context, rotation, width, height) {
+            if (rotation === 90) context.translate(height, 0);
+            else if (rotation === 180) context.translate(width, height);
+            else if (rotation === 270) context.translate(0, width);
+            context.rotate(rotation * Math.PI / 180);
         }
 
         function scheduleFrame() {
@@ -263,13 +415,19 @@
             animationFrame = null;
             if (video.paused || video.ended || !wasmModuleLoaded) return;
             var app = document.getElementById('app');
-            var geometry = frameGeometry(video.videoWidth, video.videoHeight, app.clientWidth, app.clientHeight);
+            checkMotion();
+            var rotation = motion.rotation;
+            var sideways = rotation === 90 || rotation === 270;
+            var sourceWidth = video.videoWidth;
+            var sourceHeight = video.videoHeight;
+            var geometry = frameGeometry(sideways ? sourceHeight : sourceWidth, sideways ? sourceWidth : sourceHeight,
+                                         sideways ? app.clientHeight : app.clientWidth, sideways ? app.clientWidth : app.clientHeight);
             if (!geometry || video.readyState < 2) {
                 scheduleFrame();
                 return;
             }
 
-            if (dst === null || canvas.width !== geometry.inputWidth || canvas.height !== geometry.inputHeight) {
+            if (dst === null || inputCanvas.width !== geometry.inputWidth || inputCanvas.height !== geometry.inputHeight) {
                 var next = Module._malloc(geometry.inputWidth * geometry.inputHeight * 4);
                 if (!next) {
                     console.error('Unable to allocate camera frame buffer');
@@ -277,13 +435,27 @@
                 }
                 if (dst !== null) Module._free(dst);
                 dst = next;
-                canvas.width = geometry.inputWidth;
-                canvas.height = geometry.inputHeight;
+                inputCanvas.width = geometry.inputWidth;
+                inputCanvas.height = geometry.inputHeight;
             }
 
-            ctx.drawImage(video, geometry.x, geometry.y, geometry.width, geometry.height,
-                          0, 0, canvas.width, canvas.height);
+            inputCtx.save();
+            inputCtx.scale(inputCanvas.width / geometry.width, inputCanvas.height / geometry.height);
+            inputCtx.translate(-geometry.x, -geometry.y);
+            rotateImage(inputCtx, rotation, sourceWidth, sourceHeight);
+            inputCtx.drawImage(video, 0, 0);
+            inputCtx.restore();
             ncnn_nanodet();
+
+            // Rotate the entire annotated inference result back, keeping boxes aligned.
+            var displayWidth = sideways ? inputCanvas.height : inputCanvas.width;
+            var displayHeight = sideways ? inputCanvas.width : inputCanvas.height;
+            if (canvas.width !== displayWidth) canvas.width = displayWidth;
+            if (canvas.height !== displayHeight) canvas.height = displayHeight;
+            ctx.save();
+            rotateImage(ctx, (360 - rotation) % 360, inputCanvas.width, inputCanvas.height);
+            ctx.drawImage(inputCanvas, 0, 0);
+            ctx.restore();
             scheduleFrame();
         };
 
