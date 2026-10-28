@@ -1,0 +1,546 @@
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>ncnn webassembly nanodet</title>
+    <style>
+        html, body {
+            margin: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: black;
+        }
+        #viewport {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100vh;
+            height: 100dvh;
+            overflow: hidden;
+        }
+        #app {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            width: 100%;
+            height: 100%;
+            transform: translate(-50%, -50%) rotate(var(--app-rotation, 0deg));
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        #controls {
+            flex: 0 0 auto;
+            box-sizing: border-box;
+            max-height: 50%;
+            overflow: auto;
+            padding: 12px;
+            padding-top: max(12px, var(--safe-top, env(safe-area-inset-top)));
+            padding-left: max(12px, var(--safe-left, env(safe-area-inset-left)));
+            padding-right: max(12px, var(--safe-right, env(safe-area-inset-right)));
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            color: white;
+            background: #222;
+        }
+        #camera-view {
+            position: relative;
+            flex: 1 1 0;
+            min-width: 0;
+            min-height: 0;
+            overflow: hidden;
+        }
+        #controls h1 {
+            margin: 0;
+            font-size: 16px;
+        }
+        #controls button {
+            min-height: 48px;
+        }
+        #fullscreen-status, #motion-status {
+            flex-basis: 100%;
+            font-size: 14px;
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+        #controls [role="status"]:empty {
+            display: none;
+        }
+        video {
+            /* Keep the source video rendered for Safari camera frames (see issue #17). */
+            position: absolute;
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        canvas {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%) rotate(var(--canvas-rotation, 0deg));
+            display: block;
+            width: 100%;
+            height: 100%;
+            /* Crop the complete inference image, including boxes, without distortion. */
+            object-fit: cover;
+            object-position: center;
+        }
+    </style>
+
+</head>
+
+<body>
+    <div id="viewport">
+    <div id="app">
+        <div id="controls">
+            <h1>ncnn webassembly nanodet</h1>
+            <button disabled id="switch-camera-btn">Switch Camera</button>
+            <button id="fullscreen-btn" aria-pressed="false">Fullscreen</button>
+            <button id="motion-btn" aria-pressed="false">Enable auto-rotation</button>
+            <span id="fullscreen-status" role="status"></span>
+            <span id="motion-status" role="status">Hold the device upright and check that the camera view is upright before enabling auto-rotation.</span>
+        </div>
+        <div id="camera-view">
+            <canvas id="canvas" width="640"></canvas>
+        </div>
+        <video id="video" playsinline autoplay muted></video>
+    </div>
+    </div>
+
+    <script src="wasmFeatureDetect.js"></script>
+
+    <script type='text/javascript'>
+        var Module = {};
+
+        var has_simd;
+        var has_threads;
+
+        var wasmModuleLoaded = false;
+        var wasmModuleLoadedCallbacks = [];
+
+        Module.onRuntimeInitialized = function() {
+            wasmModuleLoaded = true;
+            for (var i = 0; i < wasmModuleLoadedCallbacks.length; i++) {
+                wasmModuleLoadedCallbacks[i]();
+            }
+        };
+
+        (async function() {
+            has_simd = await wasmFeatureDetect.simd();
+            has_threads = window.crossOriginIsolated === true && await wasmFeatureDetect.threads();
+            var feature = has_simd ? 'simd' : 'basic';
+            if (has_threads) feature = has_simd ? 'simd-threads' : 'threads';
+
+            // Shared memory64 is a separate capability from ordinary memory64.
+            var use_wasm64 = await wasmFeatureDetect.memory64(has_threads);
+            async function fetchBinary(name) {
+                var response = await fetch(name + '.wasm');
+                if (!response.ok) throw new Error('Unable to load ' + name + ': HTTP ' + response.status);
+                return response.arrayBuffer();
+            }
+
+            nanodet_module_name = 'nanodet-' + (use_wasm64 ? 'wasm64-' : '') + feature;
+            var buffer = await fetchBinary(nanodet_module_name);
+            // Verify the complete binary before loading any JS/global state.
+            // A small capability probe cannot cover every emitted instruction.
+            if (use_wasm64 && !WebAssembly.validate(buffer)) {
+                nanodet_module_name = 'nanodet-' + feature;
+                buffer = await fetchBinary(nanodet_module_name);
+            }
+            if (!WebAssembly.validate(buffer)) throw new Error('Unsupported WebAssembly module: ' + nanodet_module_name);
+
+            console.log('load ' + nanodet_module_name);
+            Module.wasmBinary = buffer;
+            var script = document.createElement('script');
+            script.src = nanodet_module_name + '.js';
+            script.onload = function() { console.log('Emscripten boilerplate loaded.'); };
+            script.onerror = function() { console.error('Unable to load ' + script.src); };
+            document.body.appendChild(script);
+        })().catch(function(error) {
+            // Network/runtime failures are not mistaken for missing memory64 support.
+            console.error(error);
+        });
+
+        var shouldFaceUser = true;
+        var stream = null;
+        // Match NanoDet::target_size; do not scale inference with screen pixels or DPR.
+        var inputLongEdge = 416;
+        var animationFrame = null;
+        var inputCanvas;
+        var inputCtx;
+        var motion = {
+            active: false, pending: false, generation: 0, baseline: null, rotation: 0,
+            candidate: null, candidateSince: 0, lastValid: 0, started: 0,
+            x: null, y: null, screenAngle: null, sourceWidth: 0, sourceHeight: 0, timer: null
+        };
+
+        var dst = null;
+        var resultarray = null;
+        var resultbuffer = null;
+        window.addEventListener('DOMContentLoaded', function() {
+            switchcamerabtn = document.getElementById('switch-camera-btn');
+            video = document.getElementById('video');
+            canvas = document.getElementById('canvas');
+            ctx = canvas.getContext('2d');
+            inputCanvas = document.createElement('canvas');
+            inputCtx = inputCanvas.getContext('2d');
+
+            // A single frame chain survives camera switches without duplicate inference.
+            video.addEventListener('play', scheduleFrame);
+            video.addEventListener('canplay', scheduleFrame);
+            if (wasmModuleLoaded) scheduleFrame();
+            else wasmModuleLoadedCallbacks.push(scheduleFrame);
+
+            var app = document.getElementById('viewport');
+            var fullscreenButton = document.getElementById('fullscreen-btn');
+            var fullscreenStatus = document.getElementById('fullscreen-status');
+            if (!app.requestFullscreen || !document.fullscreenEnabled) {
+                fullscreenButton.disabled = true;
+                fullscreenStatus.textContent = 'This browser does not support page fullscreen. The view will still fit the available window.';
+            }
+            fullscreenButton.addEventListener('click', async function() {
+                fullscreenStatus.textContent = '';
+                try {
+                    if (document.fullscreenElement) await document.exitFullscreen();
+                    else await app.requestFullscreen();
+                } catch (err) {
+                    console.error('Unable to change fullscreen mode:', err);
+                    fullscreenStatus.textContent = 'Unable to change fullscreen mode: ' + err.message;
+                }
+            });
+            document.addEventListener('fullscreenchange', function() {
+                var active = document.fullscreenElement === app;
+                fullscreenButton.textContent = active ? 'Exit fullscreen' : 'Fullscreen';
+                fullscreenButton.setAttribute('aria-pressed', String(active));
+                refreshLayout();
+            });
+            window.addEventListener('resize', refreshLayout);
+            if (window.visualViewport) window.visualViewport.addEventListener('resize', refreshLayout);
+
+            var motionButton = document.getElementById('motion-btn');
+            if (!window.DeviceMotionEvent || !window.isSecureContext || screenAngle() === null) {
+                motionButton.disabled = true;
+                document.getElementById('motion-status').textContent =
+                    'Motion-based rotation is unavailable. The view will follow the browser window.';
+            }
+            motionButton.addEventListener('click', async function() {
+                if (motion.active || motion.pending) {
+                    stopMotion('Auto-rotation disabled.');
+                    return;
+                }
+                if (video.readyState < 2 || video.paused) {
+                    document.getElementById('motion-status').textContent = 'Wait for the camera, then hold it upright and try again.';
+                    return;
+                }
+                var generation = ++motion.generation;
+                motion.pending = true;
+                motionButton.textContent = 'Cancel auto-rotation';
+                document.getElementById('motion-status').textContent = 'Keep the device and camera view upright while granting permission.';
+                try {
+                    if (typeof DeviceMotionEvent.requestPermission === 'function' &&
+                        await DeviceMotionEvent.requestPermission() !== 'granted') {
+                        throw new Error('Motion permission was denied.');
+                    }
+                    if (generation !== motion.generation) return;
+                    motion.pending = false;
+                    motion.active = true;
+                    motion.started = Date.now();
+                    motion.screenAngle = screenAngle();
+                    motion.sourceWidth = video.videoWidth;
+                    motion.sourceHeight = video.videoHeight;
+                    document.getElementById('motion-status').textContent = 'Hold still and upright to calibrate auto-rotation.';
+                    motion.timer = window.setInterval(checkMotion, 250);
+                } catch (err) {
+                    if (generation === motion.generation) stopMotion('Auto-rotation unavailable: ' + err.message);
+                }
+            });
+            window.addEventListener('devicemotion', onMotion);
+            window.addEventListener('orientationchange', refreshLayout);
+            if (window.screen.orientation) window.screen.orientation.addEventListener('change', refreshLayout);
+            document.addEventListener('visibilitychange', function() {
+                if (document.hidden && (motion.active || motion.pending)) stopMotion('Auto-rotation paused. Hold upright and enable it again.');
+            });
+
+            // check whether we can use facingMode
+            var supports = navigator.mediaDevices.getSupportedConstraints();
+            if (supports['facingMode'] === true) {
+                switchcamerabtn.disabled = false;
+            }
+
+            switchcamerabtn.addEventListener('click', function() {
+                if (stream == null)
+                    return
+
+                if (motion.active || motion.pending) stopMotion('Camera changed. Hold the new view upright and enable auto-rotation again.');
+                stream.getTracks().forEach(t => {
+                    t.stop();
+                });
+
+                shouldFaceUser = !shouldFaceUser;
+                capture();
+            });
+
+            refreshLayout();
+            capture();
+        });
+
+        function capture() {
+            var constraints = { audio: false, video: { width: 640, height: 480, facingMode: shouldFaceUser ? 'user' : 'environment' } };
+            navigator.mediaDevices.getUserMedia(constraints)
+                .then(function(mediaStream) {
+                    var video = document.querySelector('video');
+                    stream = mediaStream;
+                    video.srcObject = mediaStream;
+                    video.onloadedmetadata = function(e) {
+                        video.play().catch(function(err) {
+                            console.error('Unable to start camera playback:', err);
+                        });
+                    };
+                })
+                .catch(function(err) {
+                    console.log(err.message);
+                });
+        }
+
+
+        function ncnn_nanodet() {
+            var canvas = inputCanvas;
+            var ctx = inputCtx;
+
+            var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            var data = imageData.data;
+
+            Module.HEAPU8.set(data, dst);
+
+            Module._nanodet_ncnn(dst, canvas.width, canvas.height);
+
+            var result = Module.HEAPU8.subarray(dst, dst + data.length);
+            imageData.data.set(result);
+            ctx.putImageData(imageData, 0, 0);
+        }
+
+        function phoneLayoutAngle() {
+            // Do not turn a narrow desktop window or a landscape-native tablet.
+            var mobile = navigator.userAgentData ? navigator.userAgentData.mobile :
+                         /iPhone|iPod|Android.*Mobile/.test(navigator.userAgent);
+            if (!mobile || !window.matchMedia('(pointer: coarse)').matches) return 0;
+            var angle = screenAngle();
+            if (angle === null || angle % 90 !== 0) return 0;
+            var orientation = window.screen.orientation;
+            if (orientation && orientation.type) {
+                var portraitType = orientation.type.indexOf('portrait') === 0;
+                if (portraitType !== (angle % 180 === 0)) return 0;
+            }
+            return angle;
+        }
+
+        function updateViewportLayout() {
+            var viewport = document.getElementById('viewport');
+            var app = document.getElementById('app');
+            var view = document.getElementById('camera-view');
+            var angle = phoneLayoutAngle();
+            var sideways = angle === 90 || angle === 270;
+            var width = sideways ? viewport.clientHeight : viewport.clientWidth;
+            var height = sideways ? viewport.clientWidth : viewport.clientHeight;
+            function setStyle(element, property, value) {
+                if (element.style.getPropertyValue(property) !== value) element.style.setProperty(property, value);
+            }
+            // Keep controls at the device's portrait top, not the landscape viewport top.
+            setStyle(app, 'width', width + 'px');
+            setStyle(app, 'height', height + 'px');
+            setStyle(app, '--app-rotation', -angle + 'deg');
+            // Insets are viewport-relative; map them into the counter-rotated app.
+            var edges = ['top', 'right', 'bottom', 'left'];
+            for (var i = 0; i < 4; i++) {
+                setStyle(app, '--safe-' + edges[i], 'env(safe-area-inset-' + edges[(i - angle / 90 + 4) % 4] + ')');
+            }
+            // Cancel only the layout rotation for the image. Do not guess or add
+            // a camera rotation: delivered video and gravity correction stay separate.
+            setStyle(canvas, '--canvas-rotation', angle + 'deg');
+            setStyle(canvas, 'width', (sideways ? view.clientHeight : view.clientWidth) + 'px');
+            setStyle(canvas, 'height', (sideways ? view.clientWidth : view.clientHeight) + 'px');
+        }
+
+        function refreshLayout() {
+            updateViewportLayout();
+            checkMotion();
+            scheduleFrame();
+        }
+
+        function screenAngle() {
+            var angle = window.screen.orientation && window.screen.orientation.angle;
+            if (!Number.isFinite(angle)) angle = window.orientation;
+            return Number.isFinite(angle) ? (angle % 360 + 360) % 360 : null;
+        }
+
+        function stopMotion(message) {
+            ++motion.generation;
+            window.clearInterval(motion.timer);
+            motion.active = false;
+            motion.pending = false;
+            motion.baseline = null;
+            motion.rotation = 0;
+            motion.candidate = null;
+            motion.x = null;
+            motion.y = null;
+            motion.lastValid = 0;
+            var button = document.getElementById('motion-btn');
+            button.textContent = 'Enable auto-rotation';
+            button.setAttribute('aria-pressed', 'false');
+            document.getElementById('motion-status').textContent = message;
+            scheduleFrame();
+        }
+
+        function checkMotion() {
+            if (!motion.active) return;
+            // The web API does not expose camera sensor orientation. Recalibrate
+            // when the browser may have changed the delivered frame coordinates.
+            if (screenAngle() !== motion.screenAngle ||
+                video.videoWidth !== motion.sourceWidth || video.videoHeight !== motion.sourceHeight) {
+                stopMotion('Screen or camera orientation changed. Hold upright and enable auto-rotation again.');
+            } else if (motion.baseline === null && Date.now() - motion.started > 5000) {
+                stopMotion('No stable motion data. Hold upright and try enabling auto-rotation again.');
+            } else if (motion.baseline !== null && Date.now() - motion.lastValid > 2000) {
+                stopMotion('Motion data is unavailable or unstable. Auto-rotation disabled.');
+            }
+        }
+
+        function onMotion(event) {
+            if (!motion.active) return;
+            checkMotion();
+            if (!motion.active) return;
+            var g = event.accelerationIncludingGravity;
+            if (!g || !Number.isFinite(g.x) || !Number.isFinite(g.y) || !Number.isFinite(g.z)) {
+                motion.candidate = null;
+                motion.x = null;
+                motion.y = null;
+                return;
+            }
+            var magnitude = Math.hypot(g.x, g.y, g.z);
+            // Keep the last stable orientation briefly while flat or shaking.
+            if (magnitude < 7 || magnitude > 12 || Math.hypot(g.x, g.y) < 6) {
+                motion.candidate = null;
+                motion.x = null;
+                motion.y = null;
+                return;
+            }
+            var now = Date.now();
+            motion.lastValid = now;
+            motion.x = motion.x === null ? g.x : motion.x * 0.8 + g.x * 0.2;
+            motion.y = motion.y === null ? g.y : motion.y * 0.8 + g.y * 0.2;
+            var angle = Math.atan2(-motion.x, motion.y) * 180 / Math.PI;
+            var relative = angle - (motion.baseline === null ? 0 : motion.baseline);
+            var next = ((Math.round(relative / 90) * 90) % 360 + 360) % 360;
+            if (motion.baseline !== null) {
+                var difference = ((relative - motion.rotation) % 360 + 540) % 360 - 180;
+                if (Math.abs(difference) < 55) {
+                    motion.candidate = null;
+                    return;
+                }
+            }
+            if (motion.candidate !== next) {
+                motion.candidate = next;
+                motion.candidateSince = now;
+                return;
+            }
+            if (now - motion.candidateSince < 350) return;
+            if (motion.baseline === null) {
+                motion.baseline = next;
+                document.getElementById('motion-btn').textContent = 'Disable auto-rotation';
+                document.getElementById('motion-btn').setAttribute('aria-pressed', 'true');
+                document.getElementById('motion-status').textContent = 'Auto-rotation enabled for this camera and screen orientation.';
+            } else {
+                motion.rotation = next;
+            }
+            motion.candidate = null;
+        }
+
+        // Clockwise quarter turns, with the rotated image kept in positive coordinates.
+        function rotateImage(context, rotation, width, height) {
+            if (rotation === 90) context.translate(height, 0);
+            else if (rotation === 180) context.translate(width, height);
+            else if (rotation === 270) context.translate(0, width);
+            context.rotate(rotation * Math.PI / 180);
+        }
+
+        function scheduleFrame() {
+            if (animationFrame === null) animationFrame = window.requestAnimationFrame(sFilter);
+        }
+
+        // Crop before inference, so only the viewport's field of view is processed.
+        function frameGeometry(sourceWidth, sourceHeight, viewportWidth, viewportHeight) {
+            if (sourceWidth <= 0 || sourceHeight <= 0 || viewportWidth <= 0 || viewportHeight <= 0) return null;
+            var aspect = viewportWidth / viewportHeight;
+            var width = aspect >= 1 ? inputLongEdge : Math.max(1, Math.round(inputLongEdge * aspect));
+            var height = aspect >= 1 ? Math.max(1, Math.round(inputLongEdge / aspect)) : inputLongEdge;
+            // Use the integer input aspect for a distortion-free source-to-input mapping.
+            var inputAspect = width / height;
+            var cropWidth = Math.min(sourceWidth, sourceHeight * inputAspect);
+            var cropHeight = cropWidth / inputAspect;
+            return {
+                x: (sourceWidth - cropWidth) / 2,
+                y: (sourceHeight - cropHeight) / 2,
+                width: cropWidth, height: cropHeight,
+                inputWidth: width, inputHeight: height
+            };
+        }
+
+        var sFilter = function() {
+            animationFrame = null;
+            if (video.paused || video.ended || !wasmModuleLoaded) return;
+            updateViewportLayout();
+            var view = document.getElementById('camera-view');
+            var bounds = view.getBoundingClientRect();
+            checkMotion();
+            var rotation = motion.rotation;
+            var sideways = rotation === 90 || rotation === 270;
+            var sourceWidth = video.videoWidth;
+            var sourceHeight = video.videoHeight;
+            var geometry = frameGeometry(sideways ? sourceHeight : sourceWidth, sideways ? sourceWidth : sourceHeight,
+                                         sideways ? bounds.height : bounds.width, sideways ? bounds.width : bounds.height);
+            if (!geometry || video.readyState < 2) {
+                scheduleFrame();
+                return;
+            }
+
+            if (dst === null || inputCanvas.width !== geometry.inputWidth || inputCanvas.height !== geometry.inputHeight) {
+                var next = Module._malloc(geometry.inputWidth * geometry.inputHeight * 4);
+                if (!next) {
+                    console.error('Unable to allocate camera frame buffer');
+                    return;
+                }
+                if (dst !== null) Module._free(dst);
+                dst = next;
+                inputCanvas.width = geometry.inputWidth;
+                inputCanvas.height = geometry.inputHeight;
+            }
+
+            inputCtx.save();
+            inputCtx.scale(inputCanvas.width / geometry.width, inputCanvas.height / geometry.height);
+            inputCtx.translate(-geometry.x, -geometry.y);
+            rotateImage(inputCtx, rotation, sourceWidth, sourceHeight);
+            inputCtx.drawImage(video, 0, 0);
+            inputCtx.restore();
+            ncnn_nanodet();
+
+            // Rotate the entire annotated inference result back, keeping boxes aligned.
+            var displayWidth = sideways ? inputCanvas.height : inputCanvas.width;
+            var displayHeight = sideways ? inputCanvas.width : inputCanvas.height;
+            if (canvas.width !== displayWidth) canvas.width = displayWidth;
+            if (canvas.height !== displayHeight) canvas.height = displayHeight;
+            ctx.save();
+            rotateImage(ctx, (360 - rotation) % 360, inputCanvas.width, inputCanvas.height);
+            ctx.drawImage(inputCanvas, 0, 0);
+            ctx.restore();
+            scheduleFrame();
+        };
+
+    </script>
+
+</body>
+
+</html>
