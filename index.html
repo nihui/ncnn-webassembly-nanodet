@@ -19,23 +19,31 @@
             height: 100vh;
             height: 100dvh;
             overflow: hidden;
+            display: flex;
+            flex-direction: column;
         }
         #controls {
-            position: absolute;
-            z-index: 1;
-            top: 12px;
-            top: max(12px, env(safe-area-inset-top));
-            left: 12px;
-            left: max(12px, env(safe-area-inset-left));
-            right: 12px;
-            right: max(12px, env(safe-area-inset-right));
+            flex: 0 0 auto;
+            box-sizing: border-box;
+            max-height: 50%;
+            overflow: auto;
+            padding: 12px;
+            padding-top: max(12px, env(safe-area-inset-top));
+            padding-left: max(12px, env(safe-area-inset-left));
+            padding-right: max(12px, env(safe-area-inset-right));
             display: flex;
             flex-wrap: wrap;
             align-items: center;
             gap: 8px;
             color: white;
-            text-shadow: 0 1px 3px black;
-            pointer-events: none;
+            background: #222;
+        }
+        #camera-view {
+            position: relative;
+            flex: 1 1 0;
+            min-width: 0;
+            min-height: 0;
+            overflow: hidden;
         }
         #controls h1 {
             margin: 0;
@@ -43,11 +51,15 @@
         }
         #controls button {
             min-height: 48px;
-            pointer-events: auto;
         }
         #fullscreen-status, #motion-status {
             flex-basis: 100%;
             font-size: 14px;
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+        #controls [role="status"]:empty {
+            display: none;
         }
         video {
             /* Keep the source video rendered for Safari camera frames (see issue #17). */
@@ -57,6 +69,8 @@
             height: 0;
         }
         canvas {
+            position: absolute;
+            inset: 0;
             display: block;
             width: 100%;
             height: 100%;
@@ -74,11 +88,13 @@
             <h1>ncnn webassembly nanodet</h1>
             <button disabled id="switch-camera-btn">Switch Camera</button>
             <button id="fullscreen-btn" aria-pressed="false">Fullscreen</button>
-            <span id="fullscreen-status" role="status"></span>
             <button id="motion-btn" aria-pressed="false">Enable auto-rotation</button>
+            <span id="fullscreen-status" role="status"></span>
             <span id="motion-status" role="status">Hold the device upright and check that the camera view is upright before enabling auto-rotation.</span>
         </div>
-        <canvas id="canvas" width="640"></canvas>
+        <div id="camera-view">
+            <canvas id="canvas" width="640"></canvas>
+        </div>
         <video id="video" playsinline autoplay muted></video>
     </div>
 
@@ -414,14 +430,14 @@
         var sFilter = function() {
             animationFrame = null;
             if (video.paused || video.ended || !wasmModuleLoaded) return;
-            var app = document.getElementById('app');
+            var view = document.getElementById('camera-view');
             checkMotion();
             var rotation = motion.rotation;
             var sideways = rotation === 90 || rotation === 270;
             var sourceWidth = video.videoWidth;
             var sourceHeight = video.videoHeight;
             var geometry = frameGeometry(sideways ? sourceHeight : sourceWidth, sideways ? sourceWidth : sourceHeight,
-                                         sideways ? app.clientHeight : app.clientWidth, sideways ? app.clientWidth : app.clientHeight);
+                                         sideways ? view.clientHeight : view.clientWidth, sideways ? view.clientWidth : view.clientHeight);
             if (!geometry || video.readyState < 2) {
                 scheduleFrame();
                 return;
